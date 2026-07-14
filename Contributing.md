@@ -61,7 +61,7 @@ Be respectful and constructive. We are building this together. (If a `CODE_OF_CO
 ## ❓ Questions
 
 - Licensing questions: see [LICENSING_FAQ.md](./LICENSING_FAQ.md) if available, or open a discussion.
-- Commercial use or partnership inquiries: contact us at **hello@zeraix.com**.
+- Commercial use or partnership inquiries: contact us at **emma@zeraix.com**.
 
 ---
 
