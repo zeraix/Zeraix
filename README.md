@@ -7,7 +7,7 @@
 **Born for local models.**
 The AI workspace built around on-device LLMs — not one that treats them as an afterthought.
 
-[English](README.md)
+
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/PcQ3jr3MfH)
 [![Twitter](https://img.shields.io/badge/X-@YOUR_HANDLE-000000?style=flat-square&logo=x&logoColor=white)](https://x.com/ZeraixAI)
@@ -119,7 +119,7 @@ Available in **English, 简体中文, 繁體中文, 日本語, 한국어, Franç
 
 This project is licensed under the [GNU Affero General Public License v3.0](./LICENSE).
 
-For commercial licensing or partnership inquiries, contact us at **emma@zeraix.com**.
+Zeraix is free to use, including commercially, under the terms of AGPL-3.0. If the AGPL's obligations (such as releasing source code of your modifications when offering the software over a network) don't fit your use case, a commercial license is available — contact us at emma@zeraix.com.
 
 ---
 
