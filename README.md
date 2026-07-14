@@ -4,43 +4,86 @@
 
 # Zeraix
 
-**Local-first AI assistant + coding agent.**
-Download and run on-device models, switch to cloud flagships anytime.
+**Born for local models.**
+The AI workspace built around on-device LLMs — not one that treats them as an afterthought.
 
-[English](README.md)
+[English](README.md) | [简体中文](README_zh.md)
+
+[![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/YOUR_INVITE)
+[![Twitter](https://img.shields.io/badge/X-@YOUR_HANDLE-000000?style=flat-square&logo=x&logoColor=white)](https://x.com/YOUR_HANDLE)
 
 [![Release](https://img.shields.io/github/v/release/zeraix/Zeraix?style=flat-square&color=2ea44f)](https://github.com/zeraix/Zeraix/releases)
 [![Downloads](https://img.shields.io/github/downloads/zeraix/Zeraix/total?style=flat-square&color=blue)](https://github.com/zeraix/Zeraix/releases)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square)](#-download)
 
-<img src="assets/screenshot-main.png" alt="Zeraix Screenshot" width="800" />
-
 </div>
 
 ---
 
-## What is Zeraix?
+## Why Zeraix?
 
-Zeraix is a desktop AI workspace that puts **local models first**. Run LLMs directly on your own machine for privacy and speed — and seamlessly switch to cloud flagship models when a task needs more horsepower.
+There are plenty of AI clients. Most of them are built for cloud APIs, with local models bolted on as a checkbox feature.
 
-- 🔒 **Private by default** — your conversations and files stay on your device
-- ⚡ **Fast** — no network round-trip for everyday tasks
-- 🔌 **Flexible** — cloud flagships and custom APIs are one click away
+**Zeraix is built the other way around.** Local models are the center of the product, and every feature exists to make running AI on *your own machine* genuinely great — private, fast, and yours. Cloud flagships are there when you want them, but they're the guest, not the host.
+
+What that means in practice:
+
+- 🧠 **Switch models, keep everything** — your memory and context persist when you change models. Jump from one local model to another, or from local to cloud, and the conversation just continues. No other client treats model switching as a first-class experience like this.
+- 📦 **One-click local setup** — Zeraix reads your hardware and installs a model that actually runs well on it. No terminal, no guesswork, no downloading a 70B model your laptop can't load.
+- 🔧 **Vertical local optimization** — we optimize for local inference continuously, model by model. This is our lane and we're staying in it.
+- 🔒 **Local by default** — conversations with local models never leave your device.
 
 ## ✨ Features
 
+### 📦 Local Models, Two Tracks
+
+- **Community track** — connected to Hugging Face with **GGUF** support: browse, one-click download, run
+- **Official track** *(rolling out, one model at a time)* — models deeply optimized by the Zeraix team to use **less memory and deliver better results** on consumer hardware. This is where our vertical focus shows: we tune each model individually rather than shipping generic builds
+- **Hardware-aware recommendations** — Zeraix detects your RAM, chip, and GPU, and only suggests models your machine can handle
+
 ### 💬 Assistant Mode
-Your everyday AI companion — chat, write, summarize, and get things done with built-in tool calling.
+
+Your everyday AI companion — chat, write, summarize, with built-in tool calling.
+
+- Upload documents and images for AI analysis (multimodal)
+- Extend capabilities via **MCP (Model Context Protocol)** servers
+- Cross-model memory: switch models mid-conversation without losing context
+- …and more
+
+<div align="center">
+<img src="assets/screenshot-assistant.png" alt="Zeraix Assistant Mode" width="800" />
+</div>
 
 ### 🛠️ Developer Mode
-A coding agent for real work: read and edit files, run commands, and iterate on your codebase.
 
-### 📦 Local Model Management
-Download, manage, and run on-device models with a built-in model library. No terminal required — pick a model and go.
+A coding agent that works right on your machine:
 
-### ☁️ Cloud When You Need It
-Connect official flagship models (Claude, GPT, Gemini, DeepSeek, Qwen and more) or bring your own API endpoint. Mix local and cloud freely in one workspace.
+- Read & edit local files in your projects
+- Run terminal commands and iterate on results
+- Search & browse the web for docs and answers
+- Powered by the model of your choice — local or cloud
+- …and more
+
+<div align="center">
+<img src="assets/screenshot-dev.png" alt="Zeraix Developer Mode" width="800" />
+</div>
+
+### ☁️ Cloud When You Want It
+
+- Built-in flagship support: **Claude, GPT (OpenAI), Gemini, DeepSeek, Qwen, GLM** and more
+- **Bring your own endpoint** — any OpenAI-compatible API
+- Local and cloud share one workspace, one memory, one flow
+
+### 🌍 Multilingual Interface
+
+Available in **English, 简体中文, 繁體中文, 日本語, 한국어, Français, Español, Italiano** and more.
+
+## 🔒 Privacy
+
+- Conversations with **local models stay entirely on your device** — nothing is uploaded
+- Cloud requests go **only to the provider you explicitly choose**, only when you use a cloud model
+- Cloud access is fully optional and can be disabled — Zeraix works offline with local models
 
 ## 📥 Download
 
@@ -49,25 +92,28 @@ Connect official flagship models (Claude, GPT, Gemini, DeepSeek, Qwen and more) 
 | 🍎 macOS | macOS 13+ · Apple Silicon (M1 or later) | [Latest Release](https://github.com/zeraix/Zeraix/releases/latest) |
 | 🪟 Windows | Windows 10/11 · x64 | [Latest Release](https://github.com/zeraix/Zeraix/releases/latest) |
 
-> 💡 **Tip:** Local model performance depends on your hardware. 16 GB+ RAM recommended for 7B-class models; more unlocks larger models.
+> 💡 **Local models**: 16 GB+ RAM recommended. More memory unlocks larger models — Zeraix recommends the right ones for your hardware automatically.
 
 ## 🗺️ Roadmap
 
-- [x] Assistant mode with tool calling
-- [x] Developer mode (coding agent)
-- [x] Local model download & management
-- [x] Cloud flagship models & custom API endpoints
-- [ ] **Intelligent routing** — automatically pick the best model (local or cloud) for every task based on complexity, cost, and your hardware
-- [ ] Multi-model coordination
-- [ ] Expanded local model optimizations
+- [x] Assistant mode with tool calling & MCP
+- [x] Developer mode (files, terminal, web)
+- [x] One-click local model setup with hardware-aware recommendations
+- [x] Cross-model memory & context persistence
+- [x] Multimodal input (documents & images)
+- [x] Cloud flagships & custom API endpoints
+- [ ] **Official optimized model line** — Zeraix-tuned models, released one by one
+- [ ] **Intelligent routing** — automatically pick the best model (local or cloud) for every task
+- [ ] Deeper local inference optimizations, continuously
 
-> The long-term vision: you shouldn't have to think about *which* model to use. Zeraix will learn to route every task to the right model automatically — that's what we're building toward. Follow the repo to watch it happen. ⭐
+> **Our long-term vision:** local models should handle the vast majority of your tasks — and for the few they can't, Zeraix hands off to the cloud seamlessly. As local models keep getting better and our optimizations go deeper, that "majority" only grows. Follow the repo to watch it happen. ⭐
 
 ## 🌍 Community
 
+- 💬 [Join our Discord](https://discord.gg/YOUR_INVITE)
+- 🐦 [Follow us on X](https://x.com/YOUR_HANDLE)
 - 🐛 [Report a bug](https://github.com/zeraix/Zeraix/issues/new)
 - 💡 [Request a feature](https://github.com/zeraix/Zeraix/issues/new)
-- 💬 Discussions coming soon
 
 ## 📄 License
 
@@ -79,6 +125,6 @@ For commercial licensing inquiries, please contact us.
 
 <div align="center">
 
-**If Zeraix is useful to you, consider giving it a ⭐ — it helps a lot!**
+**Built for local. If that's your thing too, a ⭐ means a lot.**
 
 </div>
