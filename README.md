@@ -38,7 +38,7 @@ What that means in practice:
 
 <img src="assets/screenshot-main.png" alt="Zeraix" width="800" />
 
-<img src="assets/screenshot-dev.png" alt="Zeraix Developer Mode" width="800" />
+<img src="assets/screenshot-models.png" alt="Zeraix Model Library" width="800" />
 
 </div>
 
