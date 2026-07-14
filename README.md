@@ -7,7 +7,7 @@
 **Local-first AI assistant + coding agent.**
 Download and run on-device models, switch to cloud flagships anytime.
 
-[English](README.md) | [简体中文](README_zh.md)
+[English](README.md)
 
 [![Release](https://img.shields.io/github/v/release/zeraix/Zeraix?style=flat-square&color=2ea44f)](https://github.com/zeraix/Zeraix/releases)
 [![Downloads](https://img.shields.io/github/downloads/zeraix/Zeraix/total?style=flat-square&color=blue)](https://github.com/zeraix/Zeraix/releases)
