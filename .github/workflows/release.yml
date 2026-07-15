@@ -207,6 +207,34 @@ jobs:
           # Let electron-builder use a token if it ever needs GitHub (avoids anonymous rate limits).
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # scripts/afterAllArtifactBuild.cjs skips signing gracefully when it finds no Developer ID
+      # or no notarization credentials. That is right for a local build and wrong for a release:
+      # without this gate, a missing or malformed CSC_LINK produces a green run and a DMG that
+      # Gatekeeper rejects on the user's machine — a failure that only surfaces after publishing.
+      - name: Verify macOS signature + notarization
+        if: matrix.name == 'macos'
+        shell: bash
+        run: |
+          shopt -s nullglob
+          dmgs=(dist-electron/*.dmg)
+          if [ ${#dmgs[@]} -eq 0 ]; then
+            echo "::error::no DMG was produced"
+            exit 1
+          fi
+          fail=0
+          for dmg in "${dmgs[@]}"; do
+            echo "--- $dmg"
+            codesign --verify --strict --verbose=2 "$dmg" || {
+              echo "::error::$dmg is not validly signed"; fail=1; continue; }
+            codesign -dv --verbose=4 "$dmg" 2>&1 | grep -q "Authority=Developer ID Application" || {
+              echo "::error::$dmg is not signed with a Developer ID Application certificate (ad-hoc or wrong cert?)"; fail=1; }
+            xcrun stapler validate "$dmg" || {
+              echo "::error::$dmg has no stapled notarization ticket"; fail=1; }
+            spctl -a -t open --context context:primary-signature -v "$dmg" || {
+              echo "::error::$dmg fails Gatekeeper assessment"; fail=1; }
+          done
+          exit $fail
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
