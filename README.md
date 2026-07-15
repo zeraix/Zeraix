@@ -157,6 +157,13 @@ When you select a cloud model, requests are sent to the endpoint or provider ass
 The interface includes translations for English, 简体中文, 繁體中文, 日本語, 한국어, Français, Español, Italiano, Deutsch, Português, and additional variants represented in the repository.
 
 ## Local and cloud boundaries
+### Why does a local-first product include cloud models?
+
+Zeraix is committed to making local models more capable, more efficient, and easier to run. We will continue improving local inference, model recommendations, memory usage, and hardware support so that more people can run useful models on more devices.
+
+At the same time, on most everyday computers today, local models are not yet able to handle every task with the capability, speed, or context that the user may need. That is why Zeraix also includes cloud models as an option. You can keep local models at the center of your workflow, use a cloud model only for the tasks that need it, and switch between them without losing your conversation, memory, files, tools, or workflow.
+
+You are free to connect your own OpenAI-compatible API without creating a Zeraix account. A Zeraix account is only required if you choose to use the hosted models or other optional cloud services provided by Zeraix. As local models and consumer hardware continue to improve, our goal is for more and more of your work to stay on your own device.
 
 | Capability | Free | Account required | Offline after setup | Source in this repository |
 |---|:---:|:---:|:---:|:---:|
