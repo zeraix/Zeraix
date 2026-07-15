@@ -121,6 +121,42 @@ jobs:
           fi
           exit $fail
 
+      # Export code-signing credentials ONLY when they are actually set.
+      # A defined-but-empty CSC_LINK is worse than an absent one: electron-builder treats ""
+      # as "a certificate path was given", resolves it against the project dir, finds a
+      # directory and hard-fails with "<projectDir> not a file"
+      # (app-builder-lib/out/codeSign/codesign.js:27). It only skips signing gracefully when
+      # the variable is absent entirely. A YAML `env:` block cannot express "absent" — an
+      # unset secret renders as "" — so the values are funnelled through $GITHUB_ENV instead.
+      # Add the secrets later and signing turns on with no workflow change.
+      - name: Export signing credentials (if configured)
+        shell: bash
+        env:
+          IN_WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          IN_WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          IN_CSC_LINK: ${{ secrets.CSC_LINK }}
+          IN_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          exported=0
+          export_if_set() {
+            local value="${!1}" target="$2"
+            [ -n "$value" ] || return 0
+            {
+              echo "${target}<<__CSC_EOF__"
+              echo "$value"
+              echo "__CSC_EOF__"
+            } >> "$GITHUB_ENV"
+            echo "exported ${target}"
+            exported=1
+          }
+          export_if_set IN_WIN_CSC_LINK WIN_CSC_LINK
+          export_if_set IN_WIN_CSC_KEY_PASSWORD WIN_CSC_KEY_PASSWORD
+          export_if_set IN_CSC_LINK CSC_LINK
+          export_if_set IN_CSC_KEY_PASSWORD CSC_KEY_PASSWORD
+          if [ "$exported" = "0" ]; then
+            echo "no signing certificate configured — an unsigned installer will be produced"
+          fi
+
       - name: Build installer (${{ matrix.name }})
         run: pnpm run ${{ matrix.script }}
         env:
@@ -137,15 +173,11 @@ jobs:
           GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
 
-          # Code signing (optional). electron-builder reads these automatically.
-          # Windows and macOS need *different* certificates, so they get separate secrets:
-          # WIN_CSC_* is the Authenticode .pfx, CSC_* is the Apple Developer ID .p12.
-          # Store each as base64 (`base64 -w0 cert.p12`).
-          # If unset, signing is gracefully skipped and an unsigned installer is produced.
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # Code signing (optional): WIN_CSC_* / CSC_* are deliberately NOT listed here.
+          # A step-level `env:` entry overrides $GITHUB_ENV, so listing them would re-introduce
+          # the empty values that the "Export signing credentials" step exists to avoid.
+          # Windows and macOS need different certificates — WIN_CSC_* is the Authenticode .pfx,
+          # CSC_* the Apple Developer ID .p12 — each stored as base64 (`base64 -w0 cert.p12`).
 
           # macOS notarization (optional) — consumed by scripts/afterAllArtifactBuild.cjs.
           # Provide EITHER the Apple ID trio OR the App Store Connect API-key trio.
