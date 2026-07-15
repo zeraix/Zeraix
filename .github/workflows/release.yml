@@ -84,6 +84,40 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Report which of the required values actually reached the runner, then fail with a
+      # clear message. Without this, a missing value surfaces as an opaque Zod "Invalid URL"
+      # from next.config.ts, three layers downstream of the real cause.
+      # Only booleans and a length are printed — never a value.
+      - name: Check required config
+        shell: bash
+        env:
+          API: ${{ vars.NEXT_PUBLIC_API_BASE_URL || secrets.NEXT_PUBLIC_API_BASE_URL }}
+          HAS_API_VAR: ${{ vars.NEXT_PUBLIC_API_BASE_URL != '' }}
+          HAS_API_SECRET: ${{ secrets.NEXT_PUBLIC_API_BASE_URL != '' }}
+          HAS_GOOGLE_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID != '' }}
+          HAS_GOOGLE_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET != '' }}
+        run: |
+          echo "NEXT_PUBLIC_API_BASE_URL   as repository Variable : $HAS_API_VAR"
+          echo "NEXT_PUBLIC_API_BASE_URL   as repository Secret   : $HAS_API_SECRET"
+          echo "GOOGLE_OAUTH_CLIENT_ID     as repository Secret   : $HAS_GOOGLE_ID"
+          echo "GOOGLE_OAUTH_CLIENT_SECRET as repository Secret   : $HAS_GOOGLE_SECRET"
+          echo "resolved NEXT_PUBLIC_API_BASE_URL length          : ${#API}"
+          fail=0
+          if [ -z "$API" ]; then
+            echo "::error::NEXT_PUBLIC_API_BASE_URL is empty. Add it under Settings > Secrets and variables > Actions, on either the Variables tab (preferred) or the Secrets tab. Environment secrets do NOT work: no job in this workflow declares 'environment:'."
+            fail=1
+          else
+            case "$API" in
+              http://*|https://*) ;;
+              *) echo "::error::NEXT_PUBLIC_API_BASE_URL must be an absolute URL starting with http:// or https:// (got ${#API} chars). Check for stray quotes, a leading 'NEXT_PUBLIC_API_BASE_URL=' prefix, or whitespace."; fail=1 ;;
+            esac
+          fi
+          if [ "$HAS_GOOGLE_ID" != "true" ]; then
+            echo "::error::GOOGLE_OAUTH_CLIENT_ID is empty. Add it as a repository Secret (not a Variable, not an environment secret)."
+            fail=1
+          fi
+          exit $fail
+
       - name: Build installer (${{ matrix.name }})
         run: pnpm run ${{ matrix.script }}
         env:
