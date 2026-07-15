@@ -39,9 +39,33 @@ files:
   - "!node_modules"
   # The main process uses the OpenAI SDK to make requests (zero runtime dependencies); this module must be included in the build bundle.
   - node_modules/openai/**/*
-  # PTY backend for the built-in terminal (native module): Bundled with the main process; its .node binary must be extracted via asarUnpack (see below). 
+  # PTY backend for the built-in terminal (native module): Bundled with the main process; its .node binary must be extracted via asarUnpack (see below).
   # electron-builder defaults to npmRebuild=true, which recompiles node-pty against the Electron ABI for the target platform.
   - node_modules/node-pty/**/*
+  # Auto-update: electron/services/updater.mjs imports electron-updater in the main process.
+  # Unlike openai above it is NOT dependency-free, and "!node_modules" excludes everything by
+  # default, so its entire transitive runtime closure must be listed by hand — miss one and the
+  # packaged app dies at startup with ERR_MODULE_NOT_FOUND (it resolves fine in dev, where
+  # node_modules is on disk, so this only ever shows up in a built installer).
+  # The flat layout works because .npmrc sets shamefully-hoist=true, which puts every transitive
+  # dep at node_modules/<name>. Regenerate this list when upgrading electron-updater by walking
+  # its package.json dependencies recursively.
+  - node_modules/electron-updater/**/*
+  - node_modules/builder-util-runtime/**/*
+  - node_modules/fs-extra/**/*
+  - node_modules/graceful-fs/**/*
+  - node_modules/jsonfile/**/*
+  - node_modules/universalify/**/*
+  - node_modules/js-yaml/**/*
+  - node_modules/argparse/**/*
+  - node_modules/lazy-val/**/*
+  - node_modules/lodash.escaperegexp/**/*
+  - node_modules/lodash.isequal/**/*
+  - node_modules/semver/**/*
+  - node_modules/tiny-typed-emitter/**/*
+  - node_modules/debug/**/*
+  - node_modules/ms/**/*
+  - node_modules/sax/**/*
   # Note: The runtime dependencies for QEMU—control.mjs and ninep-server.mjs—have been merged into electron/tools/sandbox/
   # and are bundled together via the electron/**/* pattern above (sandbox/ is no longer listed separately). The remaining files in sandbox/ are build-time artifacts and are not included in the bundle.
 
