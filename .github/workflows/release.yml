@@ -87,12 +87,14 @@ jobs:
       - name: Build installer (${{ matrix.name }})
         run: pnpm run ${{ matrix.script }}
         env:
-          # Backend API baked into the client bundle at build time. NOT secret (it
-          # ships inside the installer), so store it as a repository *Variable*.
-          # Required: .env.production is gitignored and never reaches the runner. If unset,
-          # GitHub renders this as "" — which fails the z.string().url() parse in
-          # src/lib/env.ts, so the build errors out rather than shipping a wrong endpoint.
-          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+          # Backend API baked into the client bundle at build time. Required: .env.production
+          # is gitignored and never reaches the runner. If unset, GitHub renders this as ""
+          # — which fails the z.string().url() parse in src/lib/env.ts, so the build errors
+          # out rather than silently shipping a wrong endpoint.
+          # Accepts either a repository Variable or a Secret, so it works whichever tab it
+          # was added on. Not actually secret (it ships inside the installer), so the
+          # Variable is preferred — as a Secret it gets masked to *** in build logs.
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL || secrets.NEXT_PUBLIC_API_BASE_URL }}
 
           # Google OAuth default credentials baked in by scripts/gen-google-defaults.mjs.
           GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
