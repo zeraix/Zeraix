@@ -4,19 +4,23 @@
 
 # Zeraix
 
-### AI workspace, built local-first.
+### Local AI, engineered from workspace to runtime.
 
-Run local models, work with files, use terminal tools, and execute AI agents on your own computer — without an account or subscription.
+Zeraix is an open-source desktop workspace for running private local models, tools, files, and AI agents on your own computer.
+
+Alongside the application, we continuously research how modern AI models can run more efficiently on personal hardware. **ExactFlux** is the runtime technology developed through this work, with a focus on real memory use, sustained generation speed, hardware adaptation, and verified output correctness.
 
 [Download](#-quick-start)
-· [Features](#-features)
+· [Model Systems Research](#-model-systems-research)
+· [Current Research](#current-research-tracks)
 · [Developer Guide](#-developer-quick-start)
-· [Report a Bug](https://github.com/zeraix/zeraix/issues/new)
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/PcQ3jr3MfH)
 [![X](https://img.shields.io/badge/X-@ZeraixAI-000000?style=flat-square&logo=x&logoColor=white)](https://x.com/ZeraixAI)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square)](#-quick-start)
+
+**English** · [简体中文](README.zh-CN.md)
 
 </div>
 
@@ -31,6 +35,36 @@ Run local models, work with files, use terminal tools, and execute AI agents on 
 <img src="assets/screenshot-models.png" alt="Zeraix local model library" width="800" />
 
 </div>
+
+## What Zeraix is
+
+Zeraix is built around two connected efforts:
+
+### Zeraix Desktop
+
+The open-source application people can use today:
+
+- run supported local models without a Zeraix account or subscription;
+- work with conversations, files, terminal tools, Skills, and sub-agents;
+- install and manage GGUF models and compatible runtimes;
+- use hardware-aware model and quantization recommendations;
+- execute Agent commands through an optional QEMU-based sandbox;
+- connect custom OpenAI-compatible endpoints or optional hosted models.
+
+### Zeraix Model Systems
+
+Our ongoing research into how modern models run on consumer hardware:
+
+- model-specific inference optimization;
+- memory, storage, and accelerator coordination;
+- sustained decoding and tail-latency improvement;
+- speculative decoding and multi-token prediction;
+- architecture adaptation across MoE, dense, multimodal, long-context, and future model families;
+- correctness validation across long requests and multi-turn sessions.
+
+The public desktop release currently uses **llama.cpp** as its general-purpose compatibility runtime. ExactFlux is still under active research and is not yet included in the public source tree because its architecture, interfaces, and validation requirements are still changing rapidly. **We intend to open-source ExactFlux after the research reaches a stable and sufficiently validated stage.** Until then, we will publish progress and reproducible evidence progressively without presenting research prototypes as shipping features.
+
+> We do not claim to train or own the underlying foundation models. Our work focuses on how supported models are prepared, configured, validated, and executed on-device.
 
 ## 🚀 Quick Start
 
@@ -49,10 +83,10 @@ You can also view the [latest release notes](https://github.com/zeraix/zeraix/re
 
 For local models:
 
-- **16 GB or more system memory is recommended**.
-- Some smaller models can run with 8 GB.
-- Larger models and longer contexts require more memory.
-- Model downloads can require several gigabytes of disk space.
+- **16 GB or more system memory is recommended**;
+- some smaller models can run with 8 GB;
+- larger models and longer contexts require more memory;
+- model downloads can require several gigabytes of disk space.
 
 ### 2. Install and open Zeraix
 
@@ -125,15 +159,69 @@ Before using Developer Mode:
 
 Need help? [Report a bug](https://github.com/zeraix/zeraix/issues/new) or join the [Zeraix Discord](https://discord.gg/PcQ3jr3MfH).
 
+## 🔬 Model systems research
+
+Models keep evolving. Zeraix continuously profiles, adapts, and optimizes how they use memory, storage, compute, and decoding resources on personal devices.
+
+Our work is not limited to a single architecture or model family.
+
+> **Current research platform scope (July 2026):** ExactFlux model-systems research currently focuses on **Apple Silicon and macOS**. Zeraix Desktop is available on Windows and can use compatible general-purpose runtimes, but the ExactFlux optimization work described in this section has **not yet been researched or validated on Windows**. Windows model-systems research is planned and will begin as soon as the current Apple Silicon research baseline is sufficiently stable.
+
+### Research areas
+
+| Area | What we study and optimize |
+|---|---|
+| Memory systems | Real physical memory, unified memory, model working sets, KV cache, and storage-backed execution |
+| Runtime execution | Model-specific scheduling, data movement, accelerator utilization, and stable long-running inference |
+| Decoding | Sustained token generation, speculative decoding, MTP, and tail-latency behavior |
+| Architecture adaptation | MoE, dense, multimodal, long-context, and emerging model architectures |
+| Hardware adaptation | Metal, CUDA, Vulkan, CPU, and different system-memory or VRAM tiers |
+| Model preparation | Quantization selection, runtime packaging, model assets, and validated device profiles |
+| Correctness | Same-algorithm comparisons, deterministic checks, long requests, and multi-turn stability |
+
+### Current research tracks
+
+_Last updated: July 2026_
+
+| Model track | Research focus | Current status | Public availability |
+|---|---|---|---|
+| Qwen3.6-35B-A3B | Low-memory MoE execution, MTP integration, sustained decoding, and output consistency | **Active research** — internal prototyping and validation in progress | Not publicly available yet |
+| Gemma 4 family | Working-set reduction, sustained generation, and tail-latency control | **Active research** — internal prototyping and validation in progress | Not publicly available yet |
+| Community GGUF ecosystem | Hardware detection, quantization selection, runtime configuration, and model lifecycle management | **Shipping** | Available in Zeraix Desktop |
+
+Research status definitions:
+
+| Status | Meaning |
+|---|---|
+| Exploring | Structural analysis and feasibility experiments are in progress |
+| Prototype | The approach runs, but has not passed the complete validation gate |
+| Validated | The current configuration has passed defined performance and correctness checks |
+| Preview | A build is available to selected testers with documented limitations |
+| Stable | The capability is included in a supported public release |
+
+### What we measure
+
+Optimization is not judged by a single peak-speed number. Depending on the research track, we evaluate:
+
+- real physical memory rather than model-file size alone;
+- prompt processing and sustained token generation separately;
+- first-token latency;
+- P95/P99 token latency and maximum stalls;
+- long-output and multi-turn stability;
+- context growth and KV-cache behavior;
+- storage traffic and page-fault behavior when relevant;
+- same-algorithm output consistency and deterministic hashes;
+- behavior across different hardware and memory tiers.
+
+We do not publish per-model performance claims in this README while a research track is still unstable. Once a model track has completed its research and validation gates, it will receive a dedicated model report containing the exact model, quantization, hardware, runtime version, command line, test length, measurement method, results, and known limitations. Until such a report is published, research status should not be interpreted as a reproducible public benchmark or a shipping guarantee.
+
 ## Why Zeraix?
 
-Most AI workspaces are designed around cloud APIs, with local models added as a secondary option.
+Most AI workspaces are designed around cloud APIs, with local models added as a secondary option. Zeraix is built the other way around.
 
-Zeraix is built the other way around.
+Local models are at the center of the product. Conversations, memory, files, tools, Skills, and Agent workflows are designed to run on your own computer. Cloud models remain available when you choose to use them, but they are not required for the local experience.
 
-Local models are at the center of the product. Conversations, memory, files, tools, skills, and agent workflows are designed to run on your own computer.
-
-Cloud models remain available when you choose to use them, but they are not required for the local experience.
+Zeraix also treats local inference as an active systems problem. The desktop application provides a usable product today, while our model-systems research explores how larger and more capable models can run on the hardware people already own.
 
 ### Local means local
 
@@ -173,10 +261,11 @@ Zeraix manages the local inference workflow from installation to execution:
 - start, stop, update, and inspect the local inference service;
 - expose the running model through an OpenAI-compatible local endpoint.
 
-Zeraix currently provides two model tracks:
+Zeraix distinguishes between three model paths:
 
-- **Community models** — compatible models from the open GGUF ecosystem.
-- **Zeraix optimized models** — selected configurations intended for practical use on consumer hardware.
+- **Community GGUF models** — compatible models and quantizations from the broader open-model ecosystem.
+- **Zeraix-tested profiles** — model, quantization, context, and runtime configurations tested by the Zeraix team for specific hardware tiers. These profiles do not imply that Zeraix trained or owns the underlying model.
+- **ExactFlux research builds** — model-specific inference builds under active internal research. They are not part of the public release unless a future release explicitly states otherwise.
 
 Model availability, licensing, performance, and hardware requirements vary. Review the license of each model before using or redistributing it.
 
@@ -248,9 +337,7 @@ Cloud capabilities are optional and separate from the local core:
 - account-based services;
 - optional cloud file and platform features.
 
-When you select a hosted model or custom endpoint, prompts and supported attachments are sent to the provider associated with that model.
-
-Third-party providers may charge separately and apply their own privacy and retention policies.
+When you select a hosted model or custom endpoint, prompts and supported attachments are sent to the provider associated with that model. Third-party providers may charge separately and apply their own privacy and retention policies.
 
 ### 🌍 Multilingual interface
 
@@ -268,28 +355,23 @@ The interface includes translations for:
 - Português;
 - and additional variants represented in the repository.
 
-## Local and cloud boundaries
+## Public, upstream, and research boundaries
 
-| Capability | Free | Account required | Offline after setup | Source in this repository |
-|---|:---:|:---:|:---:|:---:|
-| Local model inference | ✅ | No | ✅ | ✅ |
-| Local conversations and memory | ✅ | No | ✅ | ✅ |
-| File and terminal Agent tools | ✅ | No | ✅ | ✅ |
-| QEMU execution sandbox | ✅ | No | ✅ | ✅ |
-| Skills and sub-agents | ✅ | No | ✅ | ✅ |
-| Custom OpenAI-compatible endpoint | ✅ | No | Depends on endpoint | ✅ |
-| Zeraix hosted models | Optional | Yes | No | Client only |
-| Zeraix account and cloud files | Optional | Yes | No | Client only |
+| Capability | Available | Account required | Offline after setup | Implementation status |
+|---|:---:|:---:|:---:|---|
+| Zeraix Desktop local core | ✅ | No | ✅ | Open source in this repository |
+| Local conversations and memory | ✅ | No | ✅ | Open source in this repository |
+| File and terminal Agent tools | ✅ | No | ✅ | Open source in this repository |
+| QEMU execution sandbox | ✅ | No | ✅ | Open source in this repository |
+| Skills and sub-agents | ✅ | No | ✅ | Open source in this repository |
+| Custom OpenAI-compatible endpoints | ✅ | No | Depends on endpoint | Open source in this repository |
+| General local inference | ✅ | No | ✅ | Uses separately licensed upstream runtimes such as llama.cpp |
+| Zeraix-tested model profiles | ✅ | No | ✅ | Configuration and validation layer in this repository |
+| ExactFlux research runtime | Research | No | Intended | Currently focused on Apple Silicon/macOS; planned for open source after stabilization and validation |
+| Zeraix hosted models | Optional | Yes | No | Proprietary service; client integration only |
+| Zeraix account and cloud files | Optional | Yes | No | Proprietary service; client integration only |
 
 Zeraix does not charge for connecting a custom endpoint. The endpoint provider may charge for its service.
-
-### Why include cloud models?
-
-On many consumer computers, local models cannot yet handle every task with the quality, speed, or context length a user may require.
-
-Zeraix therefore lets you keep local models at the center of your workflow while using a cloud model only when a particular task requires it.
-
-You can switch between models without discarding your conversation, memory, files, tools, or workflow.
 
 ## 🔒 Privacy and network behavior
 
@@ -330,7 +412,7 @@ Always:
 - review commands before approving them;
 - keep backups or version control enabled.
 
-For vulnerability reporting, see [Security.md](Security.md).
+For vulnerability reporting, see [Security.md](Security.md). For additional privacy information, see [Privacy.md](Privacy.md).
 
 ## 🧑‍💻 Developer Quick Start
 
@@ -408,9 +490,7 @@ pnpm dist:mac
 pnpm dist:win
 ```
 
-Desktop packaging downloads platform resources and may require platform-specific signing and notarization credentials.
-
-Unsigned local builds can trigger operating-system security warnings.
+Desktop packaging downloads platform resources and may require platform-specific signing and notarization credentials. Unsigned local builds can trigger operating-system security warnings.
 
 For additional implementation details, see:
 
@@ -421,27 +501,34 @@ For additional implementation details, see:
 ## Architecture
 
 ```text
-Zeraix Desktop
-├── Next.js / React renderer
-│   ├── Assistant and Developer interfaces
-│   ├── Conversation state
-│   ├── Context compaction
-│   ├── Skills and sub-agents
-│   └── Permission and diff views
-├── Electron main process
-│   ├── Secure preload and IPC bridges
-│   ├── Local conversation storage
-│   ├── LLM request proxy
-│   ├── Local llama.cpp management
-│   ├── File and terminal tools
-│   └── Browser automation
-├── Execution layer
-│   ├── QEMU Linux sandbox
-│   └── Native execution path
-└── Model layer
-    ├── Local GGUF models
-    ├── Custom OpenAI-compatible endpoints
-    └── Optional Zeraix cloud services
+Zeraix
+├── Zeraix Desktop
+│   ├── Next.js / React renderer
+│   │   ├── Assistant and Developer interfaces
+│   │   ├── Conversation state and context compaction
+│   │   ├── Skills and sub-agents
+│   │   └── Permission and diff views
+│   ├── Electron main process
+│   │   ├── Secure preload and IPC bridges
+│   │   ├── Local conversation storage
+│   │   ├── LLM request proxy
+│   │   ├── Local model and runtime management
+│   │   ├── File and terminal tools
+│   │   └── Browser automation
+│   ├── Execution layer
+│   │   ├── QEMU Linux sandbox
+│   │   └── Native execution path
+│   └── Model layer
+│       ├── Community GGUF models
+│       ├── Zeraix-tested profiles
+│       ├── Custom OpenAI-compatible endpoints
+│       └── Optional Zeraix cloud services
+└── Zeraix Model Systems
+    ├── Architecture and workload profiling
+    ├── Memory and runtime research
+    ├── Decoding and hardware adaptation
+    ├── Correctness and regression validation
+    └── ExactFlux research runtime
 ```
 
 Important source directories:
@@ -453,22 +540,26 @@ Important source directories:
 | `src/lib/ai/` | Models, memory, Skills, sub-agents, and AI utilities |
 | `src/components/ai/` | Model library and AI interface components |
 | `electron/` | Electron main process and renderer bridges |
-| `electron/llm/` | Local model runtime and request proxy |
+| `electron/llm/` | Local model runtime management and request proxy |
 | `electron/tools/` | Agent tools, terminal integration, and sandbox routing |
 | `electron/tools/sandbox/` | QEMU control, filesystem sharing, and execution engine |
 | `sandbox/qemu/` | Sandbox image build files and documentation |
 | `scripts/` | Build, packaging, and resource publication scripts |
 
+The ExactFlux research runtime is not currently part of the public source directories listed above. We intend to open-source it after the architecture and validation baseline are stable enough for external use and contribution.
+
 ## Known limitations
 
 - macOS release builds currently target Apple Silicon.
 - Windows release builds currently target x64.
+- ExactFlux model-systems research currently focuses on Apple Silicon/macOS and has not yet been validated on Windows. Windows users should not assume that current research claims apply to their hardware.
 - Local model quality and tool-calling reliability depend on the selected model.
-- Performance depends on memory, GPU support, model size, quantization, and context length.
+- Performance depends on memory, GPU support, model size, quantization, context length, and runtime configuration.
 - Initial model and sandbox downloads can be large.
 - The QEMU sandbox requires hardware virtualization and additional resources.
 - Some Agent operations may use native execution when the sandbox is unavailable or disabled.
 - Hosted services require network access and may require an account or separate payment.
+- ExactFlux research results are not shipping features unless a release explicitly states otherwise.
 
 ## Troubleshooting
 
@@ -514,9 +605,7 @@ Some modes may offer native execution as a fallback. Review the execution indica
 
 ### The web page does not have desktop features
 
-`pnpm dev` starts only the web renderer.
-
-Use:
+`pnpm dev` starts only the web renderer. Use:
 
 ```bash
 pnpm electron:dev
@@ -525,6 +614,8 @@ pnpm electron:dev
 to run the full desktop application.
 
 ## Roadmap
+
+### Zeraix Desktop
 
 - [x] Local and cloud model workspace
 - [x] Assistant Mode with tool calling
@@ -537,21 +628,33 @@ to run the full desktop application.
 - [x] QEMU-based execution sandbox
 - [x] Multimodal attachments for supported models
 - [ ] Expand automated tests and continuous integration
-- [ ] Publish reproducible performance and hardware benchmarks
 - [ ] Improve sandbox visibility and strict execution policies
-- [ ] Expand the Zeraix optimized model line
 - [ ] Add intelligent local and cloud model routing
-- [ ] Continue local inference and memory-use optimizations
+
+### Zeraix Model Systems
+
+- [x] Establish repeatable low-memory model research baselines
+- [x] Add correctness gates for model-specific optimization experiments
+- [ ] Complete validation of the initial Qwen3.6 and Gemma 4 research tracks
+- [ ] Publish reproducible benchmark methodology and hardware reports
+- [ ] Expand validation across Apple Silicon memory tiers
+- [ ] Begin Windows model-systems profiling and establish the first Windows research baseline
+- [ ] Generalize model-specific research code into reusable architecture adapters
+- [ ] Prepare the first ExactFlux research preview
+- [ ] Extend research to additional architectures and hardware backends
+- [ ] Publish recurring model-systems research updates
+
+Roadmap items are directional and may change as model architectures, upstream runtimes, hardware, and validation results evolve.
 
 ## Contributing
 
-Bug reports, documentation improvements, feature proposals, translations, model compatibility reports, and focused code contributions are welcome.
+Bug reports, documentation improvements, feature proposals, translations, model compatibility reports, hardware results, and focused code contributions are welcome.
 
 Good ways to contribute include:
 
 - testing models on different hardware;
-- improving translations;
-- fixing documentation;
+- reporting model compatibility and performance behavior;
+- improving translations and documentation;
 - reproducing reported bugs;
 - improving error messages;
 - adding tests;
@@ -560,14 +663,11 @@ Good ways to contribute include:
 Before submitting a pull request:
 
 1. Read [Contributing.md](Contributing.md).
-2. Read and accept the [Contributor License Agreement](CLA.md) when prompted by the CLA bot.
-3. Keep each pull request focused on one concern.
-4. Run the available validation commands.
-5. Do not include secrets, proprietary code, model files, or incompatible third-party material.
+2. Keep each pull request focused on one concern.
+3. Run the available validation commands.
+4. Do not include secrets, proprietary code, model files, or incompatible third-party material.
 
-You retain ownership of your Contributions. The CLA allows Zeraix to continue publishing the Project under AGPL-3.0 while also offering commercial licenses.
-
-Opening Issues, reporting bugs, suggesting features, and participating in Discussions do not require acceptance of the CLA.
+Opening Issues, reporting bugs, suggesting features, sharing hardware results, and participating in Discussions are all welcome.
 
 Look for issues labeled:
 
@@ -584,9 +684,11 @@ Follow the private reporting process described in [Security.md](Security.md).
 
 ## Open-source and commercial services
 
-This repository contains the Zeraix desktop client and local-first runtime.
+This repository contains Zeraix Desktop and its local-first application runtime.
 
-The local core is free to use under the terms of AGPL-3.0.
+The public local core is free to use under the terms of AGPL-3.0. Separately licensed third-party runtimes, models, and downloaded assets remain governed by their respective licenses.
+
+ExactFlux is an active research runtime and is not currently included in this public source tree. We intend to open-source it after the architecture, interfaces, and validation baseline are stable enough for external use and contribution. The exact release scope, timing, and license will be stated clearly before publication; no specific release date is promised while the research remains unstable.
 
 Zeraix also operates optional proprietary services, which may include:
 
@@ -596,13 +698,13 @@ Zeraix also operates optional proprietary services, which may include:
 - routing;
 - commercial platform capabilities.
 
-These services are not required to use the local core and are not part of this repository.
+These services are not required to use the public local core and are not part of this repository.
 
 ## License
 
-Zeraix is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+Zeraix Desktop is licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
-You may use, study, modify, and redistribute the software under the terms of that license.
+You may use, study, modify, and redistribute the software in this repository under the terms of that license.
 
 AGPL-3.0 obligations may apply when distributing modified versions or providing modified versions for use over a network.
 
@@ -622,8 +724,15 @@ Third-party models, runtimes, libraries, and downloaded components remain govern
 
 <div align="center">
 
-**Local AI should belong to the person running it.**
+**Local AI should belong to the person running it — and the models should keep getting better on the hardware they already own.**
 
-If that idea resonates with you, consider starring the repository and helping us improve Zeraix.
+If that idea resonates with you, consider starring the repository, testing Zeraix on your hardware, and helping us improve local AI.
 
 </div>
+
+- [Discord](https://discord.gg/PcQ3jr3MfH)
+- [X / Twitter](https://x.com/ZeraixAI)
+- [Bug reports](https://github.com/zeraix/zeraix/issues/new)
+- [Feature requests](https://github.com/zeraix/zeraix/issues/new)
+- Commercial and partnership inquiries: **emma@zeraix.com**
+
