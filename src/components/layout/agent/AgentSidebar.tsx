@@ -479,9 +479,9 @@ export default function AgentSidebar({
   };
   // Sign in on demand via the global modal (used by the guest account row).
   const signIn = () => void requireLogin();
-  // Recharge is account-bound: prompt login first, then open the top-up flow.
+  // Recharge is account-bound: prompt login first, then open the top-up page.
   const handleRecharge = async () => {
-    if (await requireLogin()) router.push("/agent/settings");
+    if (await requireLogin()) router.push("/agent/wallet");
   };
   return (
     <aside className="m-2 flex h-[calc(100%_-_16px)] w-[260px] shrink-0 flex-col rounded-2xl border border-line bg-surface shadow-[0px_4px_12.3px_0px_#0000000A]">

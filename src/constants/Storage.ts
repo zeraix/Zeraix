@@ -7,6 +7,8 @@ const STORAGE_KEY = {
   notifySound: 'zeraix.notifySound',
   // System-notification behavior preferences (round completion / permission / question notifications)
   notifyPrefs: 'zeraix.notifyPrefs',
+  // Stripe top-up order awaiting confirmation ({ outTradeNo, amountUsd, createdAt }); lets polling resume after a restart
+  pendingTopup: 'zeraix.pendingTopup',
 }
 
 export default STORAGE_KEY;
