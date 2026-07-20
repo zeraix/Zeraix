@@ -47,7 +47,20 @@ export function setAuthCookie(token: string): void {
 }
 
 /**
- * Clear the user's auth data from localStorage (called on logout)
+ * Fired on `window` right after the session is cleared.
+ *
+ * Sessions also end outside React — a 401 in `lib/api/request.ts`, a failed periodic refresh — and those
+ * modules cannot call a hook. Without this signal they emptied localStorage while the auth store kept the
+ * old `userInfo`, so the UI went on showing a signed-in user whose data was already gone.
+ * SafetyRootLayout listens and resets the store; see [[authStore]].logOut.
+ */
+export const SESSION_CLEARED_EVENT = "zeraix:session-cleared";
+
+/**
+ * Clear the user's auth data from localStorage (called on logout and whenever the session expires).
+ *
+ * Always announce it: every caller wants the in-memory auth state gone too, and making that automatic
+ * is what keeps storage and store from drifting apart.
  */
 export function clearAuthCookie(): void {
   // if (typeof window === "undefined") return;
@@ -55,6 +68,10 @@ export function clearAuthCookie(): void {
 
   document.cookie =
     "token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=.zeraix.com; Secure; SameSite=None";
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(SESSION_CLEARED_EVENT));
+  }
 }
 
 /**

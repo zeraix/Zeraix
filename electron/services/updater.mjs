@@ -51,8 +51,16 @@ function wireEvents() {
 
   // The user decides when to download; auto-download would consume bandwidth unannounced.
   autoUpdater.autoDownload = false;
-  // Install on quit rather than forcing a restart out from under the user.
+  // Install on quit rather than forcing a restart out from under the user. This is what makes the
+  // renderer's "Install later" work: the staged update is applied when the app quits, so the next
+  // launch is already the new version — no further prompting needed.
   autoUpdater.autoInstallOnAppQuit = true;
+  // Always fetch the full installer instead of patching the installed one from its blockmap.
+  // The differential path is the reason a download could run to completion while emitting no
+  // "download-progress" events and, on a blockmap mismatch, finish without ever reporting
+  // "update-downloaded" — the UI looked frozen even though bytes were moving. A full download
+  // costs bandwidth once and reports progress reliably.
+  autoUpdater.disableDifferentialDownload = true;
 
   autoUpdater.on("checking-for-update", () => setState({ status: "checking", error: null }));
   autoUpdater.on("update-available", (info) => setState({ status: "available", version: info?.version ?? null, error: null }));
@@ -89,12 +97,21 @@ export async function checkForUpdates() {
   }
 }
 
-/** Download the pending update. Progress arrives via the "updater:state" broadcast. */
+/**
+ * Download the pending update. Progress arrives via the "updater:state" broadcast.
+ *
+ * Resolves only when the download finishes, so a second call while one is in flight would start a
+ * parallel download of the same file — hence the guard.
+ */
 export async function downloadUpdate() {
   if (!updatesSupported()) return { ok: false, supported: false };
+  if (state.status === "downloading") return { ok: true, alreadyRunning: true };
   try {
     setState({ status: "downloading", percent: 0, error: null });
     await autoUpdater.downloadUpdate();
+    // Belt and braces: if the run emitted no "update-downloaded" (seen on some Windows paths), the
+    // download is still finished here — report it rather than leaving the UI spinning forever.
+    if (state.status === "downloading") setState({ status: "downloaded", percent: 100 });
     return { ok: true };
   } catch (e) {
     setState({ status: "error", error: String(e?.message ?? e) });

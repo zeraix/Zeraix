@@ -104,5 +104,5 @@ export async function repayStripeOrder(
 
 /** Re-fetch the current user so the UI can pick up the new walletBalance once the webhook has credited it. */
 export async function getMe(): Promise<ApiResponse<IUser>> {
-  return request<ApiResponse<IUser>>("/me", { method: "GET" });
+  return request<ApiResponse<IUser>>("/me/usage-report", { method: "GET" });
 }

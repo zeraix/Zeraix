@@ -3,7 +3,7 @@
 import { useAuthStore } from "@/store/authStore";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { refreshTokenAction, getAuthToken } from "@/lib/actions/auth.actions";
+import { refreshTokenAction, getAuthToken, SESSION_CLEARED_EVENT } from "@/lib/actions/auth.actions";
 import { getStorage, setStorage } from "@zzcpt/zztool";
 import { hydrateAppConfig } from "@/lib/ai/appConfig";
 import { ensurePlatformApiKey } from "@/lib/ai/models";
@@ -24,7 +24,7 @@ export default function ClientRootLayout({
 
   const router = useRouter();
   const pathname = usePathname();
-  const { logIn, isLoggedIn } = useAuthStore();
+  const { logIn, logOut, isLoggedIn } = useAuthStore();
 
   // Consolidate authentication checks into a single state: 'loading' | 'authenticated' | 'unauthenticated'
   const [authStatus, setAuthStatus] = useState<'loading' | 'authenticated' | 'unauthenticated'>('loading');
@@ -56,7 +56,22 @@ export default function ClientRootLayout({
   }, []);
 
   /**
-  * The main process dispatches `route:navigate` when the user clicks an OS notification; the router is used here to handle the navigation. 
+   * Session teardown from outside React: a 401 that could not be refreshed (lib/api/request.ts) or a failed
+   * periodic refresh clears localStorage and announces it. Mirror that into the store, otherwise the app keeps
+   * rendering the signed-in user — name, avatar, wallet — from memory that storage no longer backs.
+   * The user simply becomes a guest; login is optional and is prompted on demand.
+   */
+  useEffect(() => {
+    const onCleared = () => {
+      logOut();
+      setAuthStatus('unauthenticated');
+    };
+    window.addEventListener(SESSION_CLEARED_EVENT, onCleared);
+    return () => window.removeEventListener(SESSION_CLEARED_EVENT, onCleared);
+  }, [logOut]);
+
+  /**
+  * The main process dispatches `route:navigate` when the user clicks an OS notification; the router is used here to handle the navigation.
   * In non-Electron environments, `onNotificationNavigate` returns a no-op, so the effect produces no side effects. 
   */
   useEffect(() => {

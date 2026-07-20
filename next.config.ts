@@ -1,5 +1,17 @@
 import type { NextConfig } from "next";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { env } from "./src/lib/env";
+
+/**
+ * App version, baked into the renderer bundle at build time so the Settings → About section can show it
+ * outside Electron too (browser / `next dev`). Inside the packaged app the authoritative number is
+ * app.getVersion() via the updater bridge; this is the fallback, and the two come from the same package.json.
+ */
+// Read via cwd rather than import.meta.url: Next may evaluate this config as CommonJS, where import.meta is absent.
+const appVersion: string = JSON.parse(
+  readFileSync(join(process.cwd(), "package.json"), "utf8"),
+).version;
 
 /**
  * Securely Retrieve Images in Remote Mode
@@ -27,6 +39,9 @@ const getRemotePatterns = () => {
 };
 
 const nextConfig = {
+  env: {
+    NEXT_PUBLIC_APP_VERSION: appVersion,
+  },
   typescript: {
     ignoreBuildErrors: true, 
   },

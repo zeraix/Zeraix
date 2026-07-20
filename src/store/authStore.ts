@@ -64,11 +64,13 @@ export const useAuthStore = create<UserState>((set) => ({
     });
   },
 
+  // Safe to call more than once (an explicit sign-out also clears storage, which re-announces it).
+  // `userInfo` is reset to {} rather than undefined so consumers keep reading a plain object, as on first load.
   logOut: () => {
     set({
       isLoggedIn: false,
       isVip: false,
-      userInfo: undefined,
+      userInfo: {} as IUser,
     });
   },
 
@@ -104,7 +106,7 @@ export const useAuthStore = create<UserState>((set) => ({
       const token = getAuthToken();
 
       if (!token) {
-        set({ isLoggedIn: false, userInfo: undefined });
+        set({ isLoggedIn: false, userInfo: {} as IUser });
         return false;
       }
 
@@ -129,7 +131,7 @@ export const useAuthStore = create<UserState>((set) => ({
       return true;
     } catch (error) {
       console.error("Check authentication status failed:", error);
-      set({ isLoggedIn: false, userInfo: undefined });
+      set({ isLoggedIn: false, userInfo: {} as IUser });
       return false;
     }
   },
