@@ -39,13 +39,23 @@ export default function AgentComposer({
   autoFocus = false,
   className,
   disabled = false,
+  blocked = false,
+  onBlockedSubmit,
   onSubmit,
 }: {
   placeholder?: string;
   autoFocus?: boolean;
   className?: string;
-  /** When true, disables sending (e.g. no working directory chosen yet in dev mode); preserves entered text. */
+  /** When true, disables sending outright (the send button greys out); preserves entered text. */
   disabled?: boolean;
+  /**
+   * When true, sending is not possible yet but the control stays live: the user can still press Enter
+   * or click send, and the attempt is reported through onBlockedSubmit instead of onSubmit. Used in dev
+   * mode, where a missing working folder should point at the folder picker rather than silently do nothing.
+   */
+  blocked?: boolean;
+  /** Called instead of onSubmit when a send is attempted while blocked. The typed text is kept. */
+  onBlockedSubmit?: () => void;
   onSubmit?: (text: string, attachments: Attachment[]) => void;
 }) {
   const t = useT();
@@ -120,6 +130,11 @@ export default function AgentComposer({
 
   const submit = () => {
     if (!canSend) return;
+    // Blocked, not disabled: keep the text and hand the attempt back so the caller can point at what's missing.
+    if (blocked) {
+      onBlockedSubmit?.();
+      return;
+    }
     onSubmit?.(value.trim(), attachments);
     setValue("");
     setAttachments([]);

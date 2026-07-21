@@ -324,6 +324,51 @@
   animation: scan 2s ease-in-out infinite;
 }
 
+/* Nudge: draws the eye back to a control the user skipped (dev mode requires a working folder before
+   the first message). Decaying horizontal shake, played once per attempted send. */
+@keyframes nudge-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  12% {
+    transform: translateX(-6px);
+  }
+  28% {
+    transform: translateX(6px);
+  }
+  44% {
+    transform: translateX(-4px);
+  }
+  60% {
+    transform: translateX(4px);
+  }
+  78% {
+    transform: translateX(-2px);
+  }
+}
+
+.animate-nudge {
+  animation: nudge-shake 0.6s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+/* Reduced motion: keep the attention cue, drop the movement. */
+@keyframes nudge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-nudge {
+    animation: nudge-pulse 0.45s ease-in-out 2 both;
+  }
+}
+
 
 html.dark::view-transition-old(root) {
   z-index: 2147483646;

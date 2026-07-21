@@ -33,6 +33,8 @@ export const AGENT_MODE_SELECTION_KEY = "agent.modeSelection";
 export const AGENT_SKILLS_KEY = "agent.skills";
 /** Dot path: the working directory the user explicitly selected (chosen on the /agent home page, then carried over by the /agent/chat page). */
 export const AGENT_WORKDIR_KEY = "agent.workdir";
+/** Dot path: recently used working directories (most recent first, capped), offered in the WorkdirSelector panel so switching back doesn't need the native folder dialog. */
+export const AGENT_WORKDIR_RECENTS_KEY = "agent.workdirRecents";
 /** Dot path: project / conversation records (Web fallback only; under Electron these go to a JSON file in userData). */
 export const AGENT_STORE_KEY = "agent.store";
 /** Dot path: UI language (zh / en). */

@@ -8,12 +8,14 @@
  * Once chosen, it is set as the Electron working directory and persisted (AGENT_WORKDIR_KEY); the conversation page /agent/chat reuses it.
  */
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, FolderSymlink, Monitor } from "lucide-react";
-import { getStorage } from "@zzcpt/zztool";
+import { Check, ChevronDown, Cloud, Folder, FolderSymlink, Monitor, X } from "lucide-react";
+import { getStorage, setStorage } from "@zzcpt/zztool";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -25,12 +27,13 @@ import {
 import {
   AGENT_MODE_KEY,
   AGENT_WORKDIR_KEY,
+  AGENT_WORKDIR_RECENTS_KEY,
   MODE_CHANGE_EVENT,
   WORKDIR_CLEAR_EVENT,
   WORKDIR_SET_EVENT,
   type AgentMode,
 } from "@/constants/Agent";
-import { putStorage } from "@/lib/ai/agentStorage";
+import { clearAgentWorkdir, putStorage } from "@/lib/ai/agentStorage";
 import { useT } from "@/lib/i18n";
 
 /** Take the last path segment as the folder name (handles both Windows \ and POSIX /). */
@@ -39,11 +42,22 @@ function folderName(p: string): string {
   return segs[segs.length - 1] || p;
 }
 
+/** How many previously used folders the panel offers before you have to open the native dialog. */
+const RECENTS_LIMIT = 5;
+
+const readRecents = (): string[] => {
+  const list = getStorage(AGENT_WORKDIR_RECENTS_KEY);
+  return Array.isArray(list) ? list.filter((p): p is string => typeof p === "string" && !!p) : [];
+};
+
 export default function WorkdirSelector({
   onBlockingChange,
+  nudge = 0,
 }: {
   /** blocking=true means "dev mode with no directory chosen"; the caller disables sending accordingly. */
   onBlockingChange?: (blocking: boolean) => void;
+  /** Bump this to replay the "you skipped this" animation — the caller increments it when a send is attempted while blocking. */
+  nudge?: number;
 }) {
   const t = useT();
   const [toolsReady, setToolsReady] = useState(false);
@@ -51,11 +65,17 @@ export default function WorkdirSelector({
   const [workdir, setWorkdir] = useState("");
   const [chosen, setChosen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [recents, setRecents] = useState<string[]>([]);
+  // Shake runs on a timer rather than animationend so a second attempt mid-animation still replays it.
+  const [shaking, setShaking] = useState(false);
+  // Sticky once the user has actually tried to send: the hint stays until a folder is chosen.
+  const [nudged, setNudged] = useState(false);
 
   // On mount: probe tools + restore the persisted working directory (and sync it to the main process).
   useEffect(() => {
     const ready = isToolkitAvailable();
     setToolsReady(ready);
+    setRecents(readRecents());
     const saved = getStorage(AGENT_WORKDIR_KEY);
     if (typeof saved === "string" && saved) {
       setWorkdir(saved);
@@ -82,6 +102,7 @@ export default function WorkdirSelector({
       setChosen(false);
       setWorkdir("");
       setMsg(null);
+      setNudged(false);
     };
     // The sidebar's "click a project" / right-click "new conversation in project" broadcasts the chosen directory ->
     // this component restores it and lifts the dev-mode block. Key point: switching from daily to dev (no project
@@ -95,6 +116,11 @@ export default function WorkdirSelector({
       setWorkdir(dir);
       setChosen(true);
       setMsg(null);
+      setNudged(false);
+      // Also record it: a project opened from the sidebar should show up in the panel's recents.
+      const next = [dir, ...readRecents().filter((p) => p !== dir)].slice(0, RECENTS_LIMIT);
+      setStorage(AGENT_WORKDIR_RECENTS_KEY, next);
+      setRecents(next);
       if (isToolkitAvailable()) void setWorkingDir(dir).catch(() => {});
     };
     window.addEventListener(MODE_CHANGE_EVENT, onCustom);
@@ -115,77 +141,157 @@ export default function WorkdirSelector({
     cbRef.current?.(blocking);
   }, [blocking]);
 
+  // A send was attempted while blocking → replay the shake and keep the hint visible from then on.
+  useEffect(() => {
+    if (!nudge) return;
+    setNudged(true);
+    setShaking(true);
+    const id = setTimeout(() => setShaking(false), 650); // slightly longer than the 0.6s keyframe
+    return () => clearTimeout(id);
+  }, [nudge]);
+
+  /** Apply a directory: local state + persistence + recents + the cross-component broadcast. */
+  const select = (dir: string) => {
+    setWorkdir(dir);
+    setChosen(true);
+    setNudged(false);
+    putStorage(AGENT_WORKDIR_KEY, dir); // Persist for the conversation page to reuse
+    const next = [dir, ...readRecents().filter((p) => p !== dir)].slice(0, RECENTS_LIMIT);
+    setStorage(AGENT_WORKDIR_RECENTS_KEY, next);
+    setRecents(next);
+    // Broadcast the chosen directory: the conversation page sets workdirChosen to true and applies it to the tool
+    // sandbox. Without this event, even if a directory is chosen here, the persistently-mounted conversation page
+    // wouldn't know (storage changes aren't notified across components) and dev-mode sending would wrongly report
+    // "must choose a working directory first".
+    window.dispatchEvent(new CustomEvent(WORKDIR_SET_EVENT, { detail: dir }));
+  };
+
   const browse = async () => {
     if (!toolsReady) return;
     setMsg(null);
     try {
       const dir = await chooseWorkingDir();
       if (!dir) return; // User cancelled
-      setWorkdir(dir);
-      setChosen(true);
-      putStorage(AGENT_WORKDIR_KEY, dir); // Persist for the conversation page to reuse
-      // Broadcast the chosen directory: the conversation page sets workdirChosen to true and applies it to the tool
-      // sandbox. Without this event, even if a directory is chosen here, the persistently-mounted conversation page
-      // wouldn't know (storage changes aren't notified across components) and dev-mode sending would wrongly report
-      // "must choose a working directory first".
-      window.dispatchEvent(new CustomEvent(WORKDIR_SET_EVENT, { detail: dir }));
+      select(dir);
     } catch (e) {
       setMsg(`Selection failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
+  /** Reuse a folder from the panel: same as browsing, minus the native dialog. */
+  const pickRecent = (dir: string) => {
+    if (!toolsReady) return;
+    setMsg(null);
+    select(dir);
+    void setWorkingDir(dir).catch(() => {});
+  };
+
+  // One chip summarising the run target ("Local / folder"), split into two hit zones: the label opens the
+  // folder picker straight away (the only action that's actually taken here), the chevron opens the panel.
   return (
     <div className="mt-2">
       <div className="flex items-center gap-1.5">
-        {/* Runtime environment: local (placeholder dropdown, extensible later to cloud, etc.) */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
-            >
-              <Monitor className="size-3.5 text-muted-foreground" />
-              {t("env.local")}
-              <ChevronDown className="size-3 text-muted-foreground" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-36">
-            <DropdownMenuItem>
-              <Monitor className="size-3.5" /> {t("env.local")}
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <Monitor className="size-3.5 disabled" /> {t("env.cloud")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Choose folder: optional in daily / required in dev; shows the folder name once chosen */}
-        <button
-          type="button"
-          onClick={() => void browse()}
-          disabled={!toolsReady}
-          title={!toolsReady ? t("workdir.needDesktop") : chosen ? workdir : undefined}
-          className={`flex min-w-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50 ${
-            blocking ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+        <div
+          className={`flex min-w-0 max-w-full items-stretch rounded-lg border text-xs font-medium transition ${
+            shaking ? "animate-nudge" : ""
+          } ${
+            blocking && nudged
+              ? "border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+              : "border-line bg-surface text-foreground"
           }`}
         >
-          <FolderSymlink className="size-3.5 shrink-0" />
-          <span className="truncate">
-            {chosen ? (
-              <span className="text-foreground">{folderName(workdir)}</span>
-            ) : mode === "dev" ? (
-              t("workdir.required")
-            ) : (
-              t("workdir.optional")
-            )}
-          </span>
-        </button>
+          {/* Primary action: one click straight to the native folder picker. */}
+          <button
+            type="button"
+            onClick={() => void browse()}
+            disabled={!toolsReady}
+            title={!toolsReady ? t("workdir.needDesktop") : chosen ? workdir : t("workdir.browse")}
+            className="flex min-w-0 items-center gap-1.5 rounded-l-lg px-2.5 py-1.5 transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Monitor className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="shrink-0">{t("env.local")}</span>
+            <span className="shrink-0 text-line-strong">/</span>
+            <span
+              className={`truncate ${
+                chosen ? "text-foreground" : blocking && nudged ? "" : "text-muted-foreground"
+              }`}
+            >
+              {chosen
+                ? folderName(workdir)
+                : mode === "dev"
+                  ? t("workdir.required")
+                  : t("workdir.optional")}
+            </span>
+          </button>
+
+          {/* Clear, inline: only meaningful once a folder is set, so it appears with the selection rather
+              than hiding in the panel. Daily mode then falls back to the default directory; dev mode blocks
+              sending again (clearAgentWorkdir broadcasts WORKDIR_CLEAR_EVENT, which resets this component). */}
+          {chosen && (
+            <button
+              type="button"
+              onClick={() => clearAgentWorkdir()}
+              aria-label={t("workdir.clear")}
+              title={t("workdir.clear")}
+              className="flex shrink-0 items-center px-1 text-muted-foreground transition hover:text-destructive"
+            >
+              <X className="size-3" />
+            </button>
+          )}
+
+          {/* Secondary: runtime environment + recently used folders. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={t("workdir.envLabel")}
+                className="flex shrink-0 items-center rounded-r-lg border-l border-inherit px-1.5 transition hover:bg-accent"
+              >
+                <ChevronDown className="size-3 text-muted-foreground" />
+              </button>
+            </DropdownMenuTrigger>
+
+            <DropdownMenuContent align="start" className="w-64">
+              {/* Runtime environment: local only for now; cloud is announced rather than silently dead. */}
+              <DropdownMenuLabel className="text-[11px] text-muted-foreground">
+                {t("workdir.envLabel")}
+              </DropdownMenuLabel>
+              <DropdownMenuItem>
+                <Monitor className="size-3.5" /> {t("env.local")}
+                <Check className="ml-auto size-3.5" />
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled>
+                <Cloud className="size-3.5" /> {t("env.cloud")}
+                <span className="ml-auto rounded border border-line px-1 text-[10px]">
+                  {t("env.comingSoon")}
+                </span>
+              </DropdownMenuItem>
+
+              <DropdownMenuSeparator />
+
+              {/* Working folder: reuse a recent one, or open the native picker. */}
+              <DropdownMenuLabel className="text-[11px] text-muted-foreground">
+                {t("workdir.folderLabel")}
+              </DropdownMenuLabel>
+              {recents.map((p) => (
+                <DropdownMenuItem key={p} onClick={() => pickRecent(p)} disabled={!toolsReady} title={p}>
+                  <Folder className="size-3.5 shrink-0" />
+                  <span className="truncate font-mono text-[11px]">{folderName(p)}</span>
+                  {p === workdir && chosen && <Check className="ml-auto size-3.5 shrink-0" />}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuItem onClick={() => void browse()} disabled={!toolsReady}>
+                <FolderSymlink className="size-3.5" /> {t("workdir.browse")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
-      {/* {blocking && (
+      {blocking && nudged && (
         <p className="mt-1 px-0.5 text-[11px] text-amber-600 dark:text-amber-400">
-          Dev mode: please choose a folder before starting the conversation.
+          {t("workdir.pickFirst")}
         </p>
-      )} */}
+      )}
       {msg && <p className="mt-1 px-0.5 text-[11px] text-amber-600 dark:text-amber-400">{msg}</p>}
     </div>
   );

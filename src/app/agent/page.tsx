@@ -33,10 +33,12 @@ export default function AgentHomePage() {
   const setPendingSend = useAgentChatStore((s) => s.setPendingSend);
   // In dev mode, block sending when no working directory is selected (reported by WorkdirSelector).
   const [blocked, setBlocked] = useState(false);
+  // Bumped on every send attempt made while blocked; WorkdirSelector replays its attention animation on each bump.
+  const [nudge, setNudge] = useState(0);
   const logoSrc = useThemedLogo();
 
   const handleSubmit = (text: string, attachments: Attachment[]) => {
-    if (blocked) return; // Fallback: in dev mode a directory must be selected first (sending is already disabled at this point)
+    if (blocked) return; // Fallback: in dev mode a directory must be selected first (the composer routes these to onBlockedSubmit)
     // Stash the first message (with attachments) in the store; the conversation page auto-sends it after navigation.
     setPendingSend({ text, attachments });
     router.push("/agent/chat");
@@ -62,8 +64,13 @@ export default function AgentHomePage() {
         </div>
 
         {/* Task input box + working directory selection (chosen before entering the conversation) */}
-        <AgentComposer autoFocus disabled={blocked} onSubmit={handleSubmit} />
-        <WorkdirSelector onBlockingChange={setBlocked} />
+        <AgentComposer
+          autoFocus
+          blocked={blocked}
+          onBlockedSubmit={() => setNudge((n) => n + 1)}
+          onSubmit={handleSubmit}
+        />
+        <WorkdirSelector onBlockingChange={setBlocked} nudge={nudge} />
       </div>
     </div>
   );

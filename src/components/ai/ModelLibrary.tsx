@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, Cpu, Play, Square, Trash2, FolderOpen, Loader2, Download, Check, Sparkles, RotateCcw, X, RefreshCw, HardDrive, Copy, FileText, FolderSync, Search, AlertTriangle } from "lucide-react";
 import { useT } from "@/lib/i18n";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import ModelIcon from "@/components/ai/ModelIcon";
 import {
   localLlm,
   type LocalLlmStatus,
@@ -338,6 +339,7 @@ export default function ModelLibrary() {
                 return (
                   <button key={r.repo} onClick={() => setRepoDlg(r.repo)}
                     className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-surface-muted">
+                    <ModelIcon hints={[r.repo]} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-ink">{r.repo}</span>
                       <span className="mt-0.5 block text-[11px] text-ink-muted">{t("ml.downloadsN", { n: r.downloads.toLocaleString() })}{r.gated ? ` · ${t("ml.gated")}` : ""}</span>
@@ -365,6 +367,7 @@ export default function ModelLibrary() {
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDialogId(o.model.id); } }}
                 className={`flex cursor-pointer flex-col rounded-xl border bg-surface p-4 text-left transition hover:border-line-strong hover:shadow-sm ${s.isRunning ? "border-emerald-500/40" : "border-line"}`}>
                 <div className="flex items-center gap-2">
+                  <ModelIcon hints={[o.model.id, o.model.name]} />
                   <span className="truncate text-sm font-semibold text-ink">{o.model.name}</span>
                   {isPrimary && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600"><Sparkles className="size-2.5" /> {t("ml.recommended")}</span>}
                 </div>
@@ -392,6 +395,7 @@ export default function ModelLibrary() {
             return (
               <div key={d.dir} className={`flex flex-col rounded-xl border bg-surface p-4 text-left transition ${isRunning ? "border-emerald-500/40" : "border-line"}`}>
                 <div className="flex items-center gap-2">
+                  <ModelIcon hints={[d.repo, d.name]} />
                   <span className="truncate text-sm font-semibold text-ink">{d.name}</span>
                   <span className="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[10px] text-ink-muted">{t("ml.community")}</span>
                 </div>
@@ -439,7 +443,7 @@ export default function ModelLibrary() {
             return (
               <>
                 <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2">{o.model.name}{s.isRunning && <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600">{t("ml.running")}</span>}</DialogTitle>
+                  <DialogTitle className="flex items-center gap-2"><ModelIcon hints={[o.model.id, o.model.name]} size="lg" />{o.model.name}{s.isRunning &&<span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600">{t("ml.running")}</span>}</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-3 py-1">
                   <div className="flex items-start justify-between gap-2">
@@ -515,7 +519,7 @@ export default function ModelLibrary() {
           {repoDlg && (
             <>
               <DialogHeader>
-                <DialogTitle className="truncate font-mono text-base">{repoDlg}</DialogTitle>
+                <DialogTitle className="flex items-center gap-2 font-mono text-base"><ModelIcon hints={[repoDlg]} size="lg" /><span className="truncate">{repoDlg}</span></DialogTitle>
               </DialogHeader>
               {repoInfo === null ? (
                 <p className="py-6 text-center text-sm text-ink-subtle"><Loader2 className="mr-1 inline size-3.5 animate-spin" /> {t("ml.searching")}</p>
