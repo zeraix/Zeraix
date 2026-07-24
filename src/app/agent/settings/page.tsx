@@ -26,6 +26,7 @@ import { ProjectMemorySection } from "./components/ProjectMemorySection";
 import { MemorySection } from "./components/MemorySection";
 import { GeneralSection } from "./components/GeneralSection";
 import { NotifySoundSection } from "./components/NotifySoundSection";
+import { LogsSection } from "./components/LogsSection";
 import { AboutSection } from "./components/AboutSection";
 
 export default function AgentSettingsPage() {
@@ -139,6 +140,8 @@ export default function AgentSettingsPage() {
           <GeneralSection t={t} />
         ) : effectiveSection === "notify" ? (
           <NotifySoundSection t={t} />
+        ) : effectiveSection === "logs" ? (
+          <LogsSection t={t} />
         ) : effectiveSection === "about" ? (
           <AboutSection t={t} />
         ) : (

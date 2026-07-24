@@ -6,6 +6,8 @@
  * Only available in Electron; in browser / Web deployments `isLlmProxyAvailable()` is false (should fall back to a direct fetch).
  */
 
+import type { UsageLogMeta } from "./usageLog";
+
 export interface LlmChatRequest {
   endpoint: string;
   apiKey: string;
@@ -13,6 +15,12 @@ export interface LlmChatRequest {
   body: unknown;
   /** Extra request headers (needed by a few vendors, e.g. GroupId). */
   headers?: Record<string, string>;
+  /**
+   * Usage-log attribution (see src/lib/ai/usageLog.ts). Not part of the request the provider sees:
+   * the main-process proxy strips it off and uses it to label the log entry it writes for this call.
+   * Omitted entirely while logging is off.
+   */
+  meta?: UsageLogMeta;
 }
 
 export interface LlmChatResult {

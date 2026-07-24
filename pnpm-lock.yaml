@@ -88,18 +88,12 @@ importers:
       markdown-it:
         specifier: 14.1.1
         version: 14.1.1
-      nertc-web-sdk:
-        specifier: ^5.8.34
-        version: 5.8.34
       next:
         specifier: 16.1.6
         version: 16.1.6(@babel/core@7.29.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      nim-web-sdk-ng:
-        specifier: ^10.9.76
-        version: 10.10.0
       node-pty:
         specifier: 1.1.0
         version: 1.1.0
@@ -1873,9 +1867,6 @@ packages:
 
   '@types/validate-npm-package-name@4.0.2':
     resolution: {integrity: sha512-lrpDziQipxCEeK5kWxvljWYhUvOiB2A9izZd9B2AFarYAkqZshb4lPbRs7zKEic6eGtH8V/2qJW+dPp9OtF6bw==}
-
-  '@types/webrtc@0.0.31':
-    resolution: {integrity: sha512-GEoJIoM/ddxdaGnu0enJVDTdvwwr3/tPkpXz0LBTSi282gqxWDg1ffk4fzHU2dosNshp+Slq1kfGxpKs5083Nw==}
 
   '@types/webxr@0.5.24':
     resolution: {integrity: sha512-h8fgEd/DpoS9CBrjEQXR+dIDraopAEfu4wYVNY2tEPwk60stPWhvZMf4Foo5FakuQ7HFZoa8WceaWFervK2Ovg==}
@@ -4412,9 +4403,6 @@ packages:
   neo-async@2.6.2:
     resolution: {integrity: sha512-Yd3UES5mWCSqR+qNT93S3UoYUkqAZ9lLg8a7g9rimsWmYGK8cVToA4/sF3RrshdyV3sAGMXVUmpMYOw+dLpOuw==}
 
-  nertc-web-sdk@5.8.34:
-    resolution: {integrity: sha512-9p27pfoEjzBPKCF5NZrZtcATOv8UYo3TcUengNwr8rwaUfpGsHXvc24lkI8fNdfFkoLeqwjzBorC8mjJsIVprQ==}
-
   next-themes@0.4.6:
     resolution: {integrity: sha512-pZvgD5L0IEvX5/9GWyHMf3m8BKiVQwsCMHfoFosXtXBMnaS0ZnIJ9ST4b4NqLVKDEm8QBxoNNGNaBv2JNF6XNA==}
     peerDependencies:
@@ -4441,9 +4429,6 @@ packages:
         optional: true
       sass:
         optional: true
-
-  nim-web-sdk-ng@10.10.0:
-    resolution: {integrity: sha512-Gdurm0PTYeNMf4Aq7pXECb1S6V7OCrBI83FkeMmYpDqTp29s1UX1+CZ79NcAUcGj55f0WQYGkiaE0Hcm36WNTA==}
 
   node-abi@4.32.0:
     resolution: {integrity: sha512-2cvOMwK7aQ8eQhHTG9DBK/akKfNaJDwtbxgUaA1u3BHGpd6cbUvWCbA0u3aKan+s7Nl60tMGx4tn11+VS1fiUA==}
@@ -7758,8 +7743,6 @@ snapshots:
 
   '@types/validate-npm-package-name@4.0.2': {}
 
-  '@types/webrtc@0.0.31': {}
-
   '@types/webxr@0.5.24': {}
 
   '@typescript-eslint/eslint-plugin@8.62.1(@typescript-eslint/parser@8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.0.2))(eslint@9.39.4(jiti@2.7.0))(typescript@5.0.2)':
@@ -10826,10 +10809,6 @@ snapshots:
 
   neo-async@2.6.2: {}
 
-  nertc-web-sdk@5.8.34:
-    dependencies:
-      '@types/webrtc': 0.0.31
-
   next-themes@0.4.6(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
     dependencies:
       react: 19.2.3
@@ -10858,8 +10837,6 @@ snapshots:
     transitivePeerDependencies:
       - '@babel/core'
       - babel-plugin-macros
-
-  nim-web-sdk-ng@10.10.0: {}
 
   node-abi@4.32.0:
     dependencies:

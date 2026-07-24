@@ -236,6 +236,40 @@ export function searchMemoryTool() {
 }
 
 /** Tool declaration for the task checklist (OpenAI-compatible). Handled by the render layer; pinned above the input box. */
+/**
+ * set_task_state — record your mission state (Task Memory) for YOURSELF. This brief is pinned into your
+ * context every turn and preserved verbatim across compaction, so it is where the plan/goal/constraints
+ * must live to survive a long task. It is internal working memory: it is NOT shown to the user (that is what
+ * update_todos is for), so write it for your own recall, not as a user-facing report.
+ */
+export function setTaskStateTool() {
+  return {
+    type: "function" as const,
+    function: {
+      name: "set_task_state",
+      description:
+        "Record your mission brief for your OWN recall — the plan, goal, key decisions and hard constraints for this task. " +
+        "It is pinned into your context and preserved verbatim across compaction, so you will not forget the task. INTERNAL working " +
+        "memory: NOT shown to the user (use update_todos for a user-facing checklist).\n" +
+        "Call this SPARINGLY — usually just ONCE, right after you form the plan. Call it again ONLY if the goal or overall approach " +
+        "MATERIALLY changes (a new objective, an abandoned strategy, a newly-stated hard constraint). Do NOT call it for routine " +
+        "progress, after every step, or for minor wording tweaks — the brief already stays in your context, so re-recording it each " +
+        "turn is wasteful and unnecessary. When you do call it, pass the full brief (it overwrites the previous one).",
+      parameters: {
+        type: "object",
+        properties: {
+          notes: {
+            type: "string",
+            description:
+              "The task brief in your own words: the mission/goal, the plan or phases, hard constraints, and key decisions + why. Markdown is fine. Overwrites the previous brief.",
+          },
+        },
+        required: ["notes"],
+      },
+    },
+  };
+}
+
 export function updateTodosTool() {
   return {
     type: "function" as const,

@@ -17,6 +17,7 @@ import { approvalStrings } from "./approvalStrings.mjs";
 import { setLlmConfigReader } from "../agent/modelResolver.mjs";
 import { getAppConfig } from "../appConfig.mjs";
 import { llmChat } from "../llm/proxy.mjs";
+import { appendEntry } from "../store/usageLogStore.mjs";
 import { listTools, runTool, getWorkingDir } from "../tools/aiToolkit.mjs";
 
 /** Default location, alongside the conversation store under userData/agent. */
@@ -54,7 +55,9 @@ export function initAutomation(dir) {
 
   // The agent runtime shares the chat agent's tool registry and LLM transport; only the turn loop
   // is separate (see electron/agent/turn.mjs for why).
-  const dispatcher = createDispatcher({ agent: { llmChat, listTools, runTool } });
+  // logEvent records what an unattended node actually did into the usage log (off by default). Model
+  // usage is captured inside llmChat itself; this covers the tool calls, which the transport can't see.
+  const dispatcher = createDispatcher({ agent: { llmChat, listTools, runTool, logEvent: appendEntry } });
 
   manager = createExecutionManager({
     dispatcher,

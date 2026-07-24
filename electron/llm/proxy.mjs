@@ -11,6 +11,7 @@
  * /v1/text/chatcompletion_v2) fall back to raw fetch.
  */
 import OpenAI from "openai";
+import { appendEntry, isUsageLogEnabled } from "../store/usageLogStore.mjs";
 
 const CHAT_PATH = "/chat/completions";
 
@@ -56,6 +57,61 @@ function plain(v) {
 }
 
 /**
+ * Usage logging (electron/store/usageLogStore.mjs), hooked here because this is the ONE place every
+ * model invocation passes through: the chat renderer and its sub-agents reach it over IPC, the
+ * headless automation turn calls it in-process, and so do the toolkit's own LLM-backed tools. Hooking
+ * the callers instead would mean four hooks and a fifth one missed the next time a caller is added.
+ *
+ * Attribution the proxy cannot know -- which agent, which conversation, which turn -- rides along as
+ * `req.meta`, an optional bag the callers that do know fill in. A request without it is still logged,
+ * just as the default actor. Off by default, and the guard is checked before anything is computed.
+ */
+function logModelCall(req, res, ms, stream) {
+  if (!isUsageLogEnabled()) return;
+  // The chat renderer records its own invocations (it has to: its cloud requests never come through
+  // here), so logging them again would double every chat turn in the totals.
+  if (req?.meta?.selfLogged) return;
+  try {
+    const meta = req?.meta ?? {};
+    const usage = (stream ? res?.usage : res?.data?.usage) ?? {};
+    const prompt = usage.prompt_tokens ?? 0;
+    const completion = usage.completion_tokens ?? 0;
+    appendEntry({
+      kind: "model",
+      source: meta.source,
+      actor: meta.actor,
+      convId: meta.convId,
+      turnId: meta.turnId,
+      runId: meta.runId,
+      nodeId: meta.nodeId,
+      model: req?.body?.model ?? meta.model,
+      provider: meta.provider,
+      // Host only: the full endpoint can carry a key in its query string on some gateways.
+      endpoint: hostOf(req?.endpoint),
+      promptTokens: prompt,
+      completionTokens: completion,
+      totalTokens: usage.total_tokens ?? prompt + completion,
+      cachedTokens: usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0,
+      reasoningTokens: usage.completion_tokens_details?.reasoning_tokens ?? 0,
+      stream,
+      ms,
+      ok: !!res?.ok,
+      error: res?.ok ? undefined : res?.error,
+    });
+  } catch {
+    /* logging must never take down a request */
+  }
+}
+
+function hostOf(endpoint) {
+  try {
+    return new URL(String(endpoint)).host;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Streaming forwarding (SSE): the same two paths as llmChat (SDK / rawFetch), but emits
  * incrementally with stream:true.
  * onChunk(chunkObj) is a per-chunk callback (already plain-ified, structured-cloneable for IPC
@@ -63,6 +119,13 @@ function plain(v) {
  * Returns { ok, status, usage?, error? } (usage taken from the final chunk's include_usage).
  */
 export async function llmChatStream(req, onChunk, signal) {
+  const startedAt = Date.now();
+  const res = await chatStreamOnce(req, onChunk, signal);
+  logModelCall(req, res, Date.now() - startedAt, true);
+  return res;
+}
+
+async function chatStreamOnce(req, onChunk, signal) {
   const { endpoint, apiKey, body, headers } = req ?? {};
   if (!endpoint) return { ok: false, status: 0, error: "missing endpoint" };
   const streamBody = { ...(body ?? {}), stream: true, stream_options: { include_usage: true } };
@@ -138,6 +201,13 @@ async function rawFetchStream({ endpoint, apiKey, body, headers }, onChunk, sign
 }
 
 export async function llmChat(req) {
+  const startedAt = Date.now();
+  const res = await chatOnce(req);
+  logModelCall(req, res, Date.now() - startedAt, false);
+  return res;
+}
+
+async function chatOnce(req) {
   // `signal` is only reachable on the in-process (automation) path — an AbortSignal is not
   // structured-cloneable, so the renderer's IPC call never carries one. That is exactly what lets a
   // workflow "Stop" abort an in-flight request instead of waiting for the whole response.

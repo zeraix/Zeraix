@@ -1,7 +1,7 @@
-import { Boxes, Brain, Info, KeyRound, SlidersHorizontal, User, Volume2 } from "lucide-react";
+import { Boxes, Brain, Info, KeyRound, ScrollText, SlidersHorizontal, User, Volume2 } from "lucide-react";
 
 
-export type SectionId = "account" | "models" | "keys" | "memory" | "general" | "notify" | "about";
+export type SectionId = "account" | "models" | "keys" | "memory" | "notify" | "logs" | "general" | "about";
 
 export const NAV: { id: SectionId; labelKey: string; icon: typeof User }[] = [
   { id: "account", labelKey: "settings.account", icon: User },
@@ -9,6 +9,7 @@ export const NAV: { id: SectionId; labelKey: string; icon: typeof User }[] = [
   { id: "keys", labelKey: "settings.keys", icon: KeyRound },
   { id: "memory", labelKey: "settings.memory", icon: Brain },
   { id: "notify", labelKey: "settings.notify", icon: Volume2 },
+  { id: "logs", labelKey: "settings.logs", icon: ScrollText },
   { id: "general", labelKey: "settings.general", icon: SlidersHorizontal },
   { id: "about", labelKey: "settings.about", icon: Info },
 ];
@@ -78,6 +79,8 @@ export const SECTION_KEYS: Record<SectionId, string[]> = {
     "general.storage",
     "general.storageDesc",
     "general.migrateNote",
+    "general.contextBudget",
+    "general.contextBudgetDesc",
     "general.appConfig",
     "general.appConfigDesc",
     "general.appConfigOpen",
@@ -113,6 +116,23 @@ export const SECTION_KEYS: Record<SectionId, string[]> = {
     "notify.builtin",
     "notify.reset",
     "notify.unsupported",
+  ],
+  logs: [
+    "settings.logs",
+    "logs.desc",
+    "logs.enable",
+    "logs.enableDesc",
+    "logs.viewList",
+    "logs.viewTimeline",
+    "logs.totalTokens",
+    "logs.modelCalls",
+    "logs.toolCalls",
+    "logs.subagentRuns",
+    "logs.byModel",
+    "logs.byActor",
+    "logs.byTool",
+    "logs.openDir",
+    "logs.clearDay",
   ],
   about: [
     "settings.about",

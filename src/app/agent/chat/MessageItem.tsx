@@ -956,6 +956,21 @@ export const MessageItem = memo(function MessageItem({
     return (
       <div className="flex flex-row-reverse">
         <div className="w-full max-w-[80%] rounded-2xl rounded-tr-md border border-line-strong bg-surface p-2">
+          {/* The images already attached to this message stay attached when the edit is saved (the parent
+              re-sends them, see resendRef), so show them here as read-only thumbnails to make that clear. */}
+          {m.kind === "user" && m.images && m.images.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap gap-1.5">
+              {m.images.map((src, ii) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={ii}
+                  src={src}
+                  alt={t("chat.attachmentN", { n: ii + 1 })}
+                  className="h-16 w-16 rounded-lg border border-line object-cover"
+                />
+              ))}
+            </div>
+          )}
           <textarea
             autoFocus
             value={draft}

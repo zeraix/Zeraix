@@ -46,6 +46,8 @@ import {
   exportMemoriesZip,
 } from "./memoryFiles.mjs";
 import { registerNotifications } from "./ipc/notificationIpc.mjs";
+import { registerUsageLog } from "./ipc/usageLogIpc.mjs";
+import { flushUsageLog, pruneUsageLog } from "./store/usageLogStore.mjs";
 import { registerGoogleAuth } from "./ipc/googleAuthIpc.mjs";
 import { registerUpdater } from "./ipc/updaterIpc.mjs";
 import { loadEnvFiles } from "./loadEnv.mjs";
@@ -906,6 +908,10 @@ app.whenReady().then(() => {
   // Auto-update (GitHub Releases feed; renderer drives check/download/install via window.updater)
   registerUpdater();
   registerAutomation();
+  // Token-usage log (off by default). Pruning old day files runs regardless of the switch: a log the
+  // user turned on once and forgot should not still be on disk a year later.
+  registerUsageLog();
+  void pruneUsageLog();
   registerWebviewWindowOpen();
   registerBackground();
   // Automation subsystem: fix the storage root and open/migrate the run-state database.
@@ -952,6 +958,13 @@ app.on("before-quit", () => {
   // Kill the automation child process before quitting to avoid it hanging.
   try {
     automationChild?.kill();
+  } catch {
+    /* ignore */
+  }
+  // Write out whatever the usage log still has buffered, so the last turn of a session is not the
+  // one entry missing from it.
+  try {
+    void flushUsageLog();
   } catch {
     /* ignore */
   }

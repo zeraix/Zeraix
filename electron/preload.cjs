@@ -313,6 +313,33 @@ contextBridge.exposeInMainWorld("appConfig", {
   getPath: () => ipcRenderer.invoke("appconfig:get-path"),
 });
 
+// Token-usage log (electron/store/usageLogStore.mjs). Model invocations are recorded by the LLM proxy
+// in the main process; the renderer contributes what only it knows — which actor made a tool call, and
+// what a sub-agent was delegated. Off by default; `append` is fire-and-forget so the chat loop never
+// waits on a disk write.
+contextBridge.exposeInMainWorld("usageLog", {
+  /** Whether logging is currently on. */
+  isEnabled: () => ipcRenderer.invoke("usagelog:enabled"),
+  /** Turn logging on/off (persisted to app.config [logging] usage); returns the applied value. */
+  setEnabled: (on) => ipcRenderer.invoke("usagelog:set-enabled", on),
+  /** Record one entry or an array of them. Fire-and-forget; a no-op while logging is off. */
+  append: (entries) => ipcRenderer.send("usagelog:append", entries),
+  /** Days that have a log file, newest first: [{ day, bytes, mtime }]. */
+  days: () => ipcRenderer.invoke("usagelog:days"),
+  /** Read one day with optional filters; returns { day, total, matched, entries }. */
+  read: (opts) => ipcRenderer.invoke("usagelog:read", opts),
+  /** Aggregate one day (totals + breakdown by model / actor / tool). */
+  stats: (day) => ipcRenderer.invoke("usagelog:stats", day),
+  /** Delete one day's file, or every day when `day` is omitted; returns how many were removed. */
+  clear: (day) => ipcRenderer.invoke("usagelog:clear", day),
+  /** Force the buffered entries to disk (the viewer does this before reading today). */
+  flush: () => ipcRenderer.invoke("usagelog:flush"),
+  /** Absolute path of the log directory. */
+  dir: () => ipcRenderer.invoke("usagelog:dir"),
+  /** Open the log directory in the system file manager; returns { ok, path, error? }. */
+  openDir: () => ipcRenderer.invoke("usagelog:open-dir"),
+});
+
 // Automation workflows (electron/automation/*). Named `workflows`, NOT `automation` — that global is
 // already the <webview> CDP browser panel above, and its `automation:event` channel is broadcast to
 // every window, so sharing the namespace would cross-wire the two features.

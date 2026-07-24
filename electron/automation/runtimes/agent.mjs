@@ -20,7 +20,14 @@ import { runAgentTurn } from "../../agent/turn.mjs";
 import { resolveChain } from "../../agent/modelResolver.mjs";
 import { createEventQueue, anySignal } from "./eventQueue.mjs";
 
-export function createAgentRuntime({ llmChat, listTools, runTool }) {
+/**
+ * @param {object} deps
+ * @param {Function} deps.llmChat / deps.listTools / deps.runTool  Injected transport (see module header).
+ * @param {(entry:object)=>void} [deps.logEvent]  Optional usage-log sink. Injected rather than imported
+ *   for the same reason as everything else here: the store needs `electron`, and importing it would
+ *   make this module -- and the dispatcher that pulls it in -- unloadable under `npm test`.
+ */
+export function createAgentRuntime({ llmChat, listTools, runTool, logEvent }) {
   if (!llmChat || !listTools || !runTool) {
     throw new Error("agent runtime requires llmChat, listTools and runTool");
   }
@@ -48,6 +55,16 @@ export function createAgentRuntime({ llmChat, listTools, runTool }) {
       const internal = new AbortController();
       const signal = anySignal([ctx.signal, internal.signal]);
 
+      // Attribution for the usage log: a headless run has no conversation, so the node is the actor.
+      // Rides along on every request; ignored entirely when logging is off.
+      const meta = {
+        source: "automation",
+        actor: `node:${ctx.nodeId}`,
+        runId: ctx.runId,
+        nodeId: ctx.nodeId,
+        turnId: ctx.runId,
+      };
+
       let result = null;
       let failure = null;
       const turn = runAgentTurn({
@@ -59,6 +76,7 @@ export function createAgentRuntime({ llmChat, listTools, runTool }) {
         runTool,
         toolPolicy: cfg.toolPolicy,
         maxRounds: cfg.maxRounds,
+        meta,
         signal,
         onEvent: (e) => queue.push(e),
       })
@@ -70,8 +88,33 @@ export function createAgentRuntime({ llmChat, listTools, runTool }) {
         })
         .finally(() => queue.close());
 
+      // Pairs tool:started (which carries the arguments) with tool:finished (which carries the outcome)
+      // into one log entry. A single slot is enough: turn.mjs runs a round's tool calls strictly in
+      // sequence, so a second one never starts before the first has finished.
+      let startedTool = null;
       try {
-        for await (const event of queue) yield event;
+        for await (const event of queue) {
+          if (logEvent) {
+            if (event.type === "tool:started") {
+              startedTool = { name: event.name, args: event.args };
+            } else if (event.type === "tool:finished") {
+              logEvent({
+                kind: "tool",
+                ...meta,
+                name: event.name,
+                args: startedTool?.name === event.name ? startedTool.args : undefined,
+                ms: event.ms,
+                ok: event.ok !== false,
+                blocked: event.blocked,
+                resultChars: event.chars,
+                resultPreview: event.preview,
+                error: event.error,
+              });
+              startedTool = null;
+            }
+          }
+          yield event;
+        }
 
         if (failure) throw failure;
         if (!result?.ok) throw new Error(result?.error ?? "agent turn produced no result");

@@ -11,6 +11,7 @@ import {
   type Project,
   type StoredCompaction,
   type StoredMessage,
+  type StoredTaskMemory,
 } from "@/lib/ai/conversation";
 
 /** Temporary storage for the "initial message" to be sent when transitioning from Home to Chat page (passed in-memory via SPA client navigation). */
@@ -73,6 +74,8 @@ type AgentChatState = {
   setConversationModel: (id: string, modelId: string | null) => void;
   /** Saves or clears the context compaction snapshot for a conversation (persists to disk only). */
   setConversationCompaction: (id: string, compaction: StoredCompaction | null) => void;
+  /** Saves or clears the Task Memory (prose brief + todos) for a conversation (persists to disk only). */
+  setConversationTaskMemory: (id: string, taskMemory: StoredTaskMemory | null) => void;
   renameConversation: (id: string, title: string) => void;
   deleteConversation: (id: string) => void;
   /** Renames a project (changes its display name). */
@@ -303,6 +306,19 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => {
         ),
       }));
       // Compaction involves only flushing to disk.
+      if (pid) markProjectDirty(pid);
+    },
+
+    setConversationTaskMemory: (id, taskMemory) => {
+      const conv = get().getConversation(id);
+      if (!conv) return;
+      const pid = conv.projectId;
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === id ? { ...c, taskMemory: taskMemory ?? undefined } : c,
+        ),
+      }));
+      // Like compaction: a runtime artifact, flushed to disk only.
       if (pid) markProjectDirty(pid);
     },
 

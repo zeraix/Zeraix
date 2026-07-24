@@ -24,6 +24,23 @@ export const PARALLEL_SAFE_TOOLS = new Set([
   "file_info",
 ]);
 
+/** Tools the chat page executes itself instead of handing to the toolkit: they drive UI (a choice card,
+ *  the todo list, the browser panel) or renderer-local state (skills, memory files). Every other tool goes
+ *  through execToolCall, which is where the usage log records it — so these are logged from the dispatcher
+ *  instead. run_subagent is deliberately absent: runSubAgent logs the delegation, with its rounds and tokens. */
+export const RENDERER_HANDLED_TOOLS = new Set([
+  "ask_user",
+  "update_todos",
+  "set_task_state",
+  "openBrowser",
+  "browser",
+  "image_generation",
+  "load_skill",
+  "save_memory",
+  "delete_memory",
+  "search_memory",
+]);
+
 /** Tools exempt from capToolOutput. read_file bounds itself by line range (offset/limit), so its output is already
  *  the slice the model asked for — running it through a head+tail cap would punch a hole in the middle of the very
  *  code the model is reasoning about, and the model cannot tell elided code from absent code. Everything else

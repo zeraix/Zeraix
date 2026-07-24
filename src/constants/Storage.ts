@@ -9,6 +9,8 @@ const STORAGE_KEY = {
   notifyPrefs: 'zeraix.notifyPrefs',
   // Stripe top-up order awaiting confirmation ({ outTradeNo, amountUsd, createdAt }); lets polling resume after a restart
   pendingTopup: 'zeraix.pendingTopup',
+  // Absolute context working-set budget in K tokens (auto-compaction cap); 0 = disabled (window-relative only)
+  contextBudget: 'zeraix.contextBudget',
 }
 
 export default STORAGE_KEY;

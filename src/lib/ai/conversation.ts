@@ -91,8 +91,18 @@ export interface Conversation {
   messages: StoredMessage[];
   /** Context-compaction snapshot (optional): restores the compaction state after close/reopen. Not part of the integrity hash. */
   compaction?: StoredCompaction;
+  /** Task Memory (optional): the pinned per-mission prose brief (internal, model-only). A runtime artifact
+   *  like compaction; restored on reopen so the mission survives, and not part of the integrity hash. */
+  taskMemory?: StoredTaskMemory;
   createdAt: number;
   updatedAt: number;
+}
+
+/** Persisted Task Memory (see app/agent/chat/taskMemory.ts). Structurally identical to TaskMemory; kept
+ *  here to avoid a lib→app import. Read back through normalizeTaskMemory, which repairs any partial data. */
+export interface StoredTaskMemory {
+  /** Free-form markdown task brief (mission / plan / constraints / decisions in the model's own words). */
+  notes: string;
 }
 
 /** A project = working directory + mode. An empty workdir means the "default project" (daily mode with no folder chosen). */

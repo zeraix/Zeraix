@@ -1,9 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, Database, FileCog } from "lucide-react";
+import { Activity, Database, FileCog, Gauge } from "lucide-react";
 import { chooseStorePath, getStorePath, isFileStoreAvailable, setStorePath } from "@/lib/ai/conversation";
 import { isAppConfigAvailable, openAppConfigFile } from "@/lib/ai/appConfig";
+import {
+  DEFAULT_CONTEXT_BUDGET_K,
+  MAX_CONTEXT_BUDGET_K,
+  MIN_CONTEXT_BUDGET_K,
+  getContextBudgetK,
+  setContextBudgetK,
+} from "@/lib/ai/contextBudget";
 import {
   type BackgroundState,
   getBackgroundState,
@@ -26,11 +33,17 @@ export function GeneralSection({ t }: { t: TFunc }) {
   const [appConfigMsg, setAppConfigMsg] = useState<string | null>(null);
   // Background / tray mode. `null` = desktop bridge absent (web build) -> the whole block is hidden.
   const [bg, setBg] = useState<BackgroundState | null>(null);
+  // Absolute context working-set budget (K tokens); "" input is treated as 0 = off.
+  const [budgetK, setBudgetK] = useState(DEFAULT_CONTEXT_BUDGET_K);
+  const [budgetInput, setBudgetInput] = useState(String(DEFAULT_CONTEXT_BUDGET_K));
 
   useEffect(() => {
     setConfigurable(isFileStoreAvailable());
     setAppConfigOk(isAppConfigAvailable());
     void getBackgroundState().then(setBg);
+    const b = getContextBudgetK();
+    setBudgetK(b);
+    setBudgetInput(String(b));
     void getStorePath().then((p) => {
       if (p) {
         setPath(p);
@@ -38,6 +51,14 @@ export function GeneralSection({ t }: { t: TFunc }) {
       }
     });
   }, []);
+
+  const applyBudget = () => {
+    const n = Math.round(Number(budgetInput));
+    setContextBudgetK(!Number.isFinite(n) || n <= 0 ? 0 : n);
+    const eff = getContextBudgetK(); // clamped/normalized by the store
+    setBudgetK(eff);
+    setBudgetInput(String(eff));
+  };
 
   const onChanged = async (dir: string) => {
     setPath(dir);
@@ -122,6 +143,51 @@ export function GeneralSection({ t }: { t: TFunc }) {
           {t("general.unsupported")}
         </p>
       )}
+
+      {/* Context working-set budget: caps auto-compaction at an absolute token budget so large-window
+          models don't hoard hundreds of thousands of tokens. Available in every build (localStorage pref). */}
+      <div className="mt-6">
+        <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
+          <Gauge className="size-4 text-ink-muted" />
+          {t("general.contextBudget")}
+        </p>
+        <div className="rounded-xl border border-line bg-surface-muted/50 px-4 py-3.5">
+          <p className="mb-2 text-xs text-ink-subtle">{t("general.contextBudgetDesc")}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={MAX_CONTEXT_BUDGET_K}
+              value={budgetInput}
+              onChange={(e) => setBudgetInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  applyBudget();
+                }
+              }}
+              onBlur={applyBudget}
+              placeholder="0"
+              className="w-24 rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-xs tabular-nums outline-none transition focus:border-ring focus:ring-2 focus:ring-primary/10"
+            />
+            <span className="text-xs text-ink-subtle">{t("general.contextBudgetUnit")}</span>
+            <button
+              onClick={applyBudget}
+              className="shrink-0 rounded-lg bg-gradient-to-br from-primary to-primary/85 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:brightness-105"
+            >
+              {t("general.apply")}
+            </button>
+          </div>
+          <p className="mt-2 text-[11px] text-ink-subtle">
+            {t("general.current")}
+            <span className="font-mono text-ink-muted">
+              {budgetK > 0 ? `${budgetK} ${t("general.contextBudgetUnit")}` : t("general.contextBudgetOff")}
+            </span>
+            {budgetK > 0 && budgetK < MIN_CONTEXT_BUDGET_K ? ` (min ${MIN_CONTEXT_BUDGET_K})` : ""}
+          </p>
+        </div>
+      </div>
 
       {/* app.config: open the persisted config file in the system's default editor (desktop app only). */}
       {appConfigOk && (

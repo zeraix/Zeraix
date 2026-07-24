@@ -54,6 +54,8 @@ function isLocalModel(model) {
  * @param {(name:string, args:object)=>Promise<object>} opts.runTool
  * @param {{allow?:string[], deny?:string[]}} [opts.toolPolicy]
  * @param {number} [opts.maxRounds]
+ * @param {object} [opts.meta]                 Attribution passed through to the transport (see the
+ *                                             usage log in electron/llm/proxy.mjs). Opaque here.
  * @param {AbortSignal} [opts.signal]
  * @param {(event:object)=>void} [opts.onEvent]  Progress sink (log / usage), mapped to NodeEvents.
  * @returns {Promise<{ok:true, text:string, rounds:number, modelUsed:string, usage:object}
@@ -68,6 +70,7 @@ export async function runAgentTurn({
   runTool,
   toolPolicy,
   maxRounds = DEFAULT_MAX_ROUNDS,
+  meta,
   signal,
   onEvent = () => {},
 }) {
@@ -87,7 +90,7 @@ export async function runAgentTurn({
   for (const model of chain) {
     if (signal?.aborted) return { ok: false, error: "cancelled" };
     const attempt = await runWithModel({
-      model, messages: [...messages], tools, llmChat, runTool, toolPolicy, maxRounds, signal, onEvent, usage,
+      model, messages: [...messages], tools, llmChat, runTool, toolPolicy, maxRounds, meta, signal, onEvent, usage,
     });
     if (attempt.ok) return { ...attempt, usage, modelUsed: model.label };
     lastError = attempt.error;
@@ -99,7 +102,7 @@ export async function runAgentTurn({
 }
 
 /** One model's full multi-round attempt. `fatal` marks errors no fallback model could fix. */
-async function runWithModel({ model, messages, tools, llmChat, runTool, toolPolicy, maxRounds, signal, onEvent, usage }) {
+async function runWithModel({ model, messages, tools, llmChat, runTool, toolPolicy, maxRounds, meta, signal, onEvent, usage }) {
   // Local models are uncapped (see LOCAL_MAX_ROUNDS): the round ceiling exists to bound spending.
   const local = isLocalModel(model);
   const roundCap = local ? LOCAL_MAX_ROUNDS : maxRounds;
@@ -135,7 +138,14 @@ async function runWithModel({ model, messages, tools, llmChat, runTool, toolPoli
 
     // Pass the signal so a "Stop" aborts the in-flight request itself, not just the gap between rounds
     // — a slow local model can hold one request open for a long time.
-    const res = await llmChat({ endpoint: model.endpoint, apiKey: model.apiKey, body, signal });
+    // `meta` is attribution for the usage log only; the transport ignores it when logging is off.
+    const res = await llmChat({
+      endpoint: model.endpoint,
+      apiKey: model.apiKey,
+      body,
+      signal,
+      ...(meta ? { meta: { ...meta, round } } : {}),
+    });
     if (signal?.aborted) return { ok: false, error: "cancelled", fatal: true };
     if (!res?.ok) {
       const detail = res?.error || (res?.data ? JSON.stringify(res.data).slice(0, 300) : "");

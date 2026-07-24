@@ -16,6 +16,7 @@
  */
 import { resolveActiveModel } from "@/lib/ai/models";
 import { chatViaProxy, isLlmProxyAvailable } from "@/lib/ai/llm";
+import { buildLogMeta } from "@/lib/ai/usageLog";
 import type { WorkflowDefinition, WorkflowNode } from "@/lib/workflows";
 import { stepCatalogText, getStepType } from "./blocks";
 
@@ -178,6 +179,8 @@ export async function runAssistant(
     res = await chatViaProxy({
       endpoint: model.endpoint,
       apiKey: model.apiKey,
+      // Attribution for the usage log; undefined (and so absent) while logging is off.
+      meta: buildLogMeta({ source: "workflow-builder", actor: "builder" }),
       body: {
         model: model.model,
         messages: [

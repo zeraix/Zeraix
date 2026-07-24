@@ -20,15 +20,32 @@ interface MsgLike {
   tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>;
 }
 
+/**
+ * Optional content-keyed memoization. Off by default so normal callers pay nothing. The diagnostics
+ * replay (contextDiag.simulateBudgets) re-counts the same message strings hundreds of times across
+ * candidate budgets and turns; it enables the cache around a run and clears it after, turning hundreds
+ * of full-conversation tokenizations into one-per-unique-string. Keyed by the string itself — slices
+ * reuse the same primitive references, so lookups hit.
+ */
+let tokenCache: Map<string, number> | null = null;
+export function setTokenCache(enabled: boolean): void {
+  tokenCache = enabled ? new Map() : null;
+}
+
 /** Token count for plain text. */
 export function countTokens(text: string): number {
   if (!text) return 0;
+  const cached = tokenCache?.get(text);
+  if (cached !== undefined) return cached;
+  let n: number;
   try {
-    return getEnc().encode(text).length;
+    n = getEnc().encode(text).length;
   } catch {
     // Fallback: when the tokenizer errors, roughly estimate at ~4 chars/token.
-    return Math.ceil(text.length / 4);
+    n = Math.ceil(text.length / 4);
   }
+  tokenCache?.set(text, n);
+  return n;
 }
 
 /** Token count for a single message (including content and tool_calls). */

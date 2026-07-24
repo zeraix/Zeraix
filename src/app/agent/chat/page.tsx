@@ -40,6 +40,21 @@ import {
   setWorkingDir,
 } from "@/lib/ai/toolkit";
 import { chatViaProxy, chatStreamViaProxy, isLlmProxyAvailable, isLlmStreamAvailable } from "@/lib/ai/llm";
+import {
+  buildLogMeta,
+  isUsageLogEnabledSync,
+  logContextDiag,
+  logModelCall,
+  logSubagentRun,
+  logToolCall,
+  primeUsageLog,
+} from "@/lib/ai/usageLog";
+import {
+  describeContext,
+  simulateBudgets,
+  defaultBudgetCandidates,
+  formatSimulation,
+} from "./contextDiag";
 import { isLocalEndpoint, localLlm, LOCAL_PROVIDER_ID } from "@/lib/ai/localModel";
 import { setSandboxMode, onSandboxStatus, getSandboxStatus, getSandboxVmInfo, sandboxEnvHint, isSandboxEngine, type SandboxStatus } from "@/lib/ai/sandbox";
 import { useT } from "@/lib/i18n";
@@ -76,11 +91,22 @@ import {
   compactionSavings,
   serializeCompaction,
   deserializeCompaction,
+  resolveHybridBudget,
   MANUAL_COMPACT_MIN_PCT,
   type CompactionState,
 } from "./contextCompress";
+import { getContextBudgetK } from "@/lib/ai/contextBudget";
+import {
+  isTaskMemoryEmpty,
+  normalizeTaskMemory,
+  renderTaskMemory,
+  mergeExtracted,
+  parseSummaryWithTaskState,
+  type TaskMemory,
+  type ExtractedTaskState,
+} from "./taskMemory";
 import type { StoredCompaction } from "@/lib/ai/conversation";
-import { countMessagesTokens, countMessageTokens } from "@/lib/ai/tokenizer";
+import { countMessagesTokens, countMessageTokens, countTokens } from "@/lib/ai/tokenizer";
 // ── Extracted modules (data / types / constants / tool declarations / display components) ──────────────────────
 import {
   resolveActiveModel,
@@ -107,6 +133,7 @@ import {
   FORCE_REVIEW_NUDGE,
   MUTATING_FILE_TOOLS,
   PARALLEL_SAFE_TOOLS,
+  RENDERER_HANDLED_TOOLS,
   RATING_DOWN_FEEDBACK,
   RATING_UP_FEEDBACK,
   RESUME_NUDGE,
@@ -138,6 +165,7 @@ import {
   imageGenerationTool,
   searchMemoryTool,
   updateTodosTool,
+  setTaskStateTool,
 } from "./agentTools";
 import { generate, capabilityAvailable, imageErrorKey } from "@/lib/ai/generation";
 import {
@@ -223,6 +251,12 @@ function appendToSystemPrompt(msgs: ApiMsg[], text: string): ApiMsg[] {
  */
 type RunCtx = {
   convId: string;
+  /**
+   * Identifies this one generation in the usage log. Every model call, tool call and delegation the
+   * turn produces carries it, which is what lets the log viewer's timeline group a turn's spending
+   * instead of showing a flat list of unrelated requests.
+   */
+  turnId: string;
   signal: AbortSignal;
   push: (m: DisplayMsg) => void;
   status: (s: string) => void;
@@ -242,6 +276,15 @@ type RunCtx = {
  * vision-capable model. Unlike the local-model downgrade, inline images are dropped too: the provider's schema has no
  * image variant at all. Only affects this send's wire, never convoRef / persistence.
  */
+/** Host of an endpoint, for the usage log. Host only: some gateways carry a key in the query string. */
+function hostOfEndpoint(endpoint: string): string | undefined {
+  try {
+    return new URL(endpoint).host;
+  } catch {
+    return undefined;
+  }
+}
+
 function stripAllImagesForText(messages: ApiMsg[]): ApiMsg[] {
   return messages.map((m) => {
     if (m.role !== "user" || !Array.isArray(m.content)) return m;
@@ -477,6 +520,13 @@ function ChatAgent() {
   // A one-time "rating feedback" hint: set when the user thumbs up / down the previous reply and triggers a regeneration; appended to the wire only for this round's first request,
   // not displayed and not persisted (same one-time nudge mechanism as RESUME_NUDGE). Used to let the rating influence the current conversation's next generation in real time.
   const feedbackNudgeRef = useRef<string | null>(null);
+  // Context diagnostics (measurement phase): the last wire + tool schemas + window actually sent, so the
+  // offline budget-replay harness (window.__ctxSim, dev only) can run against a real heavy task on demand.
+  const diagRef = useRef<{ messages: ApiMsg[]; tools: unknown[]; contextWindow: number }>({
+    messages: [],
+    tools: [],
+    contextWindow: 0,
+  });
   // Token usage: turnUsageRef accumulates all requests of "this round" (including tool rounds and subagents); sessionUsage is the whole-session accumulation.
   // estimated indicates that part of this round / session was estimated with tiktoken (the provider did not return usage).
   const turnUsageRef = useRef({ prompt: 0, completion: 0, total: 0, cached: 0, estimated: false });
@@ -542,6 +592,44 @@ function ChatAgent() {
       else todosByConvRef.current.delete(convId);
     }
     if (convId === convIdRef.current) setTodos(next);
+  };
+
+  // Task Memory: the model's INTERNAL mission brief (prose only). Deliberately separate from the visible
+  // todos above — it is context the model reads (pinned into the wire, preserved across compaction), never
+  // shown to the user. Per-conversation and persisted so the mission survives reopen.
+  const taskNotesByConvRef = useRef(new Map<string, string>());
+  const taskNotesFor = (convId: string | null): string =>
+    (convId ? taskNotesByConvRef.current.get(convId) : undefined) ?? "";
+  const taskMemoryFor = (convId: string | null): TaskMemory => ({ notes: taskNotesFor(convId) });
+  /** Persist (or clear when empty) a conversation's Task Memory brief. */
+  const persistTaskMemory = (convId: string | null) => {
+    if (!convId) return;
+    const tm = taskMemoryFor(convId);
+    useAgentChatStore.getState().setConversationTaskMemory(convId, isTaskMemoryEmpty(tm) ? null : tm);
+  };
+  const setTaskNotesFor = (convId: string | null, notes: string) => {
+    const trimmed = notes.trim();
+    if (convId) {
+      if (trimmed) taskNotesByConvRef.current.set(convId, trimmed);
+      else taskNotesByConvRef.current.delete(convId);
+    }
+    persistTaskMemory(convId);
+  };
+
+  // The model calls set_task_state: record its internal mission brief into Task Memory, pinned into the wire
+  // every turn and preserved across compaction. Not shown to the user. When the brief is unchanged, return a
+  // discouraging result so the model stops re-recording it every turn (it over-calls otherwise; the brief is
+  // already in context and the compaction extractor backstops it, so sparse updates are enough).
+  const setTaskState = (ctx: RunCtx, rawArgs: Record<string, unknown>): string => {
+    if (typeof rawArgs.notes !== "string") {
+      return "No change — pass `notes` (your mission brief) to record it.";
+    }
+    const next = rawArgs.notes.trim();
+    if (next === taskNotesFor(ctx.convId)) {
+      return "Task state unchanged — it is already pinned in your context; do not call set_task_state again unless the plan or goal materially changes.";
+    }
+    setTaskNotesFor(ctx.convId, next);
+    return "Task state recorded.";
   };
 
   // The model calls update_todos: overwrite that conversation's list with the full list, returning a short confirmation.
@@ -708,6 +796,85 @@ function ChatAgent() {
     return () => { alive = false; off?.(); };
   }, [isLocalModel, activeModel?.id]);
 
+  // Keep the diagnostics' context window current even before the first send of a freshly-loaded
+  // conversation, so the harness reports the right window (e.g. 1M) rather than a fallback.
+  useEffect(() => {
+    diagRef.current.contextWindow =
+      activeModel?.contextWindow ?? resolveContextWindow(activeModel?.model ?? "");
+  }, [activeModel]);
+
+  // Expose the offline budget-replay harness on the window so a real heavy task can be simulated from
+  // the console: `__ctxSim()` (default budget spread) or `__ctxSim(40, 60, 80)` (custom K-token budgets).
+  // It RETURNS a structured result — so the numbers are visible even when the console's level filter
+  // hides console.log/Info output — and also logs a formatted table. Read-only measurement; deliberately
+  // available in every build during this measurement phase (not gated on NODE_ENV), so it works on the
+  // packaged app the user actually runs a heavy task in.
+  useEffect(() => {
+
+    const w = window as unknown as { __ctxSim?: (...budgetsK: number[]) => unknown };
+    const K = (n: number) => `${(n / 1000).toFixed(1)}K`;
+    w.__ctxSim = (...budgetsK: number[]) => {
+      try {
+        const messages = convoRef.current; // the full verbatim buffer — the simulator does its own compaction
+        const { tools, contextWindow } = diagRef.current;
+        const userTurns = messages.filter((m) => m.role === "user").length;
+        if (userTurns === 0) {
+          const note = "[ctxSim] No conversation captured yet — open or send a heavy task first, then re-run __ctxSim().";
+          console.log(note);
+          return { note };
+        }
+        const cw = contextWindow || 128000;
+        const schemaTokens = tools.length ? countTokens(JSON.stringify(tools)) : 0;
+        const candidates = budgetsK.length
+        ? [
+              { label: "current (window-relative)" },
+              ...budgetsK.map((kk) => ({
+                label: `${kk}K budget`,
+                triggerTokens: Math.min(cw * 0.75, kk * 1000),
+                targetTokens: Math.min(cw * 0.5, Math.round(kk * 1000 * 0.65)),
+              })),
+            ]
+            : defaultBudgetCandidates(cw);
+        const result = simulateBudgets({ messages, contextWindow: cw, schemaTokens, candidates });
+        console.log(formatSimulation(result));
+        const b = result.finalBreakdown;
+        // A compact, expandable object so the key numbers are legible even with console.log hidden.
+        return {
+          turns: result.turns,
+          window: K(cw),
+          buckets: {
+            system: K(b.system),
+            toolSchemas: schemaTokens ? K(schemaTokens) : "not captured — send once this session",
+            history: K(b.history),
+            toolOutputs: K(b.toolOutputs),
+            subagent: K(b.subagentOutputs),
+            messagesTotal: K(b.total),
+          },
+          dedupReclaim: K(result.dedupReclaimTokens),
+          redundantReReads: b.rereads,
+          budgets: result.reports.map((r) => ({
+            budget: r.label,
+            maxWire: K(r.maxWireTokens),
+            avgWire: K(r.avgWireTokens),
+            summariserCalls: r.summariserCalls,
+            coldWrites: r.coldWrites,
+            summariserInput: K(r.summariserInputTokens),
+          })),
+          full: result,
+        };
+      } catch (err) {
+        // Return the failure (filter-proof) as well as logging it — the console level filter was
+        // swallowing the throw, which is why __ctxSim() looked like it produced "nothing".
+        const e = err as Error;
+        console.error("[ctxSim] crashed:", e);
+        return { error: e?.message ?? String(err), stack: e?.stack };
+      }
+    };
+    return () => {
+      delete w.__ctxSim;
+    };
+  }, []);
+
   // After mount, restore the last selection / key + probe whether local tools are available (Electron only).
   useEffect(() => {
     void (async () => {
@@ -718,6 +885,9 @@ function ChatAgent() {
       const ready = isToolkitAvailable();
       setToolsReady(ready);
       setProxyReady(isLlmProxyAvailable());
+      // Usage log: read the switch once so the per-tool-call log helpers can answer synchronously.
+      // Off by default, in which case every logging call below is a no-op.
+      void primeUsageLog();
       setInstalledSkillsBoth(loadInstalled()); // Restore installed skills (including enabled state)
       // Working directory: prefer the directory explicitly chosen and persisted on the home page (the previous stage); otherwise take the main process's current directory.
       const savedWorkdir = getStorage(AGENT_WORKDIR_KEY);
@@ -994,6 +1164,7 @@ function ChatAgent() {
     setQueued([]); // New conversation: clear the queue panel (the new conversation has no queue yet)
     setAttachments([]); // Clear unsent attachments
     setTodosFor(convIdRef.current, []); // Clear this conversation's task list
+    setTaskNotesFor(convIdRef.current, ""); // ...and its Task Memory brief
     turnUsageRef.current = { prompt: 0, completion: 0, total: 0, cached: 0, estimated: false };
     setSessionUsage({ prompt: 0, completion: 0, total: 0, cached: 0, estimated: false }); // Reset the session token stats
     setCtxTokens(0); // New conversation: context usage back to zero
@@ -1029,6 +1200,7 @@ function ChatAgent() {
     setQueued([]);
     setAttachments([]);
     setTodosFor(id, []);
+    setTaskNotesFor(id, ""); // clear this conversation's Task Memory brief too
     turnUsageRef.current = { prompt: 0, completion: 0, total: 0, cached: 0, estimated: false };
     setSessionUsage({ prompt: 0, completion: 0, total: 0, cached: 0, estimated: false });
     setCtxTokens(0);
@@ -1099,6 +1271,12 @@ function ChatAgent() {
     snapshotCompaction(convIdRef.current); // Save the old conversation's compaction state before switching away
     interruptedRef.current = false; // Switching conversations: the interrupt-resume flag does not carry across conversations
     convIdRef.current = id;
+    // Restore this conversation's internal Task Memory brief from disk into the ref, so the mission survives
+    // app reopen. Seed only if the ref doesn't already hold a live in-session copy.
+    if (conv.taskMemory && !taskNotesByConvRef.current.has(id)) {
+      const tm = normalizeTaskMemory(conv.taskMemory);
+      if (tm.notes) taskNotesByConvRef.current.set(id, tm.notes);
+    }
     // Swap the todo panel to this conversation's own list (empty unless it has one in flight). Without this the
     // previous conversation's todos stayed on screen, looking as though they belonged to the conversation just opened.
     setTodos(todosFor(id));
@@ -1333,6 +1511,9 @@ function ChatAgent() {
     // Passing onDelta requests "streaming": callbacks the accumulated content/reasoning chunk by chunk, for real-time display.
     // Downstream still treats it as a "non-streaming complete response" — this function reassembles the SSE deltas back into a complete ChatResponse before returning.
     onDelta?: (d: { content: string; reasoning: string }) => void,
+    // Usage-log attribution (who is spending these tokens). Undefined while logging is off, and the
+    // proxy is what actually writes the entry — see src/lib/ai/usageLog.ts.
+    log?: { actor: string; convId?: string; turnId?: string },
   ): Promise<ChatResponse> => {
     const body = {
       model: modelName,
@@ -1340,6 +1521,19 @@ function ChatAgent() {
       ...(tools && tools.length ? { tools, tool_choice: "auto" } : {}),
     };
     const wantStream = !!onDelta;
+    const actor = log?.actor ?? "main";
+    const startedAt = Date.now();
+    // selfLogged: this function records the invocation below, whichever transport it ends up using.
+    // It must, because the branch further down sends cloud requests with a direct fetch that never
+    // reaches the main-process proxy where the other hook lives.
+    const meta = buildLogMeta({
+      source: "chat",
+      actor,
+      convId: log?.convId,
+      turnId: log?.turnId,
+      provider: activeModel?.providerId,
+      selfLogged: true,
+    });
 
     // Streaming increment accumulator: reassemble the OpenAI SSE deltas back into a complete message (content / reasoning_content / tool_calls).
     const accum = {
@@ -1421,10 +1615,10 @@ function ChatAgent() {
     if (isLlmProxyAvailable() && isLocalEndpoint(endpoint)) {
       if (wantStream && isLlmStreamAvailable()) {
         data = streamErr(
-          await chatStreamViaProxy({ endpoint, apiKey: apiKey.trim() || "local", body }, handleChunk, signal),
+          await chatStreamViaProxy({ endpoint, apiKey: apiKey.trim() || "local", body, meta }, handleChunk, signal),
         );
       } else {
-        const res = await chatViaProxy({ endpoint, apiKey: apiKey.trim() || "local", body });
+        const res = await chatViaProxy({ endpoint, apiKey: apiKey.trim() || "local", body, meta });
         if (!res.ok) {
           throw new Error(localErr(res.status, res.error));
         }
@@ -1433,9 +1627,9 @@ function ChatAgent() {
     } else if (!proxyReady) {
       // The proxy is a single IPC and cannot abort an in-flight network request; instead the caller checks signal.aborted after the await to exit.
       if (wantStream && isLlmStreamAvailable()) {
-        data = streamErr(await chatStreamViaProxy({ endpoint, apiKey: apiKey.trim(), body }, handleChunk, signal));
+        data = streamErr(await chatStreamViaProxy({ endpoint, apiKey: apiKey.trim(), body, meta }, handleChunk, signal));
       } else {
-        const res = await chatViaProxy({ endpoint, apiKey: apiKey.trim(), body });
+        const res = await chatViaProxy({ endpoint, apiKey: apiKey.trim(), body, meta });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}${res.error ? ` — ${res.error.slice(0, 300)}` : ""}`);
         }
@@ -1487,6 +1681,8 @@ function ChatAgent() {
     // Accumulate this round's token usage (including every request of tool rounds and subagents).
     // Prefer the provider-returned usage (exact); when missing, estimate with tiktoken and mark it estimated.
     const u = data.usage;
+    // The same numbers go to the usage log below, so it reports exactly what the context bar reports.
+    let logged: { prompt: number; completion: number; total: number; cached: number; estimated: boolean };
     if (u) {
       const p = u.prompt_tokens ?? 0;
       const c = u.completion_tokens ?? 0;
@@ -1495,8 +1691,9 @@ function ChatAgent() {
       turnUsageRef.current.total += u.total_tokens ?? p + c;
       // Input tokens served from the prefix cache: the field differs by provider (DeepSeek uses prompt_cache_hit_tokens,
       // OpenAI-compatible uses prompt_tokens_details.cached_tokens); accumulate whichever is present, for the UI to show the cache effect.
-      turnUsageRef.current.cached +=
-        u.prompt_cache_hit_tokens ?? u.prompt_tokens_details?.cached_tokens ?? 0;
+      const cached = u.prompt_cache_hit_tokens ?? u.prompt_tokens_details?.cached_tokens ?? 0;
+      turnUsageRef.current.cached += cached;
+      logged = { prompt: p, completion: c, total: u.total_tokens ?? p + c, cached, estimated: false };
     } else {
       const p = countMessagesTokens(messages);
       const c = countMessageTokens(data.choices?.[0]?.message);
@@ -1504,7 +1701,30 @@ function ChatAgent() {
       turnUsageRef.current.completion += c;
       turnUsageRef.current.total += p + c;
       turnUsageRef.current.estimated = true;
+      logged = { prompt: p, completion: c, total: p + c, cached: 0, estimated: true };
     }
+
+    // Usage log entry for this invocation. Written here rather than in the proxy because a cloud model
+    // in the desktop app is fetched straight from the renderer (see the transport branch above), so the
+    // proxy sees only local endpoints; the request carries selfLogged so it is never counted twice.
+    logModelCall({
+      actor,
+      model: modelName,
+      provider: activeModel?.providerId,
+      endpoint: hostOfEndpoint(endpoint),
+      promptTokens: logged.prompt,
+      completionTokens: logged.completion,
+      totalTokens: logged.total,
+      cachedTokens: logged.cached,
+      estimated: logged.estimated,
+      stream: wantStream,
+      ms: Date.now() - startedAt,
+      // An abort returns whatever streamed in before the stop, which is a cancelled call, not a clean one.
+      ok: !signal?.aborted,
+      error: signal?.aborted ? "cancelled" : undefined,
+      convId: log?.convId,
+      turnId: log?.turnId,
+    });
 
     // Official direct-connection models are billed by the platform per request, so the balance moves with
     // every step of a tool loop — not just at the end of the turn. Refresh as each step lands so the
@@ -1537,17 +1757,45 @@ function ChatAgent() {
     tools?: unknown[],
     signal?: AbortSignal,
     onDelta?: (d: { content: string; reasoning: string }) => void,
+    log?: { actor: string; convId?: string; turnId?: string },
   ): Promise<ChatResponse> => {
     const hasImages = messages.some(
       (m) => Array.isArray(m.content) && m.content.some((p) => p.type === "image_url"),
     );
+    // A request that never returned has no usage to report, but "the model was called and it failed"
+    // is precisely what someone reading the log at 3am needs to see. sendChatOnce logs only the calls
+    // that come back, so the throwing ones are recorded here.
+    const startedAt = Date.now();
+    const logFailure = (e: unknown) =>
+      logModelCall({
+        actor: log?.actor ?? "main",
+        model: modelName,
+        provider: activeModel?.providerId,
+        endpoint: hostOfEndpoint(endpoint),
+        ms: Date.now() - startedAt,
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+        convId: log?.convId,
+        turnId: log?.turnId,
+      });
     try {
-      return await sendChatOnce(messages, tools, signal, onDelta);
+      return await sendChatOnce(messages, tools, signal, onDelta, log);
     } catch (e) {
       // No images to blame, or the user cancelled: this failure is genuine, surface it unchanged.
-      if (!hasImages || signal?.aborted) throw e;
+      if (!hasImages || signal?.aborted) {
+        logFailure(e);
+        throw e;
+      }
+      logFailure(e); // the first attempt failed on its own terms, whatever the retry goes on to do
       const stripped = stripAllImagesForText(messages);
-      const data = await sendChatOnce(stripped, tools, signal, onDelta); // throws the retry's own error if it also fails
+      // The retry is logged as its own invocation: it is a second request that the provider bills for.
+      let data: ChatResponse;
+      try {
+        data = await sendChatOnce(stripped, tools, signal, onDelta, log); // throws the retry's own error if it also fails
+      } catch (retryErr) {
+        logFailure(retryErr);
+        throw retryErr;
+      }
       if (activeModel?.id) markVisionUnsupported(activeModel.id);
       return data;
     }
@@ -1576,7 +1824,11 @@ function ChatAgent() {
   };
 
   /** Call the current model to compress the earlier history into a summary body (throws on failure, and the caller falls back to dedup-only). Counted toward this round's usage. */
-  const summarizeHistory = async (msgs: ApiMsg[], signal?: AbortSignal): Promise<string> => {
+  const summarizeHistory = async (
+    msgs: ApiMsg[],
+    signal?: AbortSignal,
+    log?: { actor: string; convId?: string; turnId?: string },
+  ): Promise<{ summary: string; extracted: ExtractedTaskState | null }> => {
     const sys: ApiMsg = {
       role: "system",
       content:
@@ -1587,23 +1839,40 @@ function ChatAgent() {
         "③ the reasons and basis for reaching that conclusion and choosing that approach — why it was done this way, which alternatives were ruled out, and based on which findings; " +
         "④ key analysis findings and important data — do not just write \"read/checked some file\", write the concrete conclusions / key content / values derived from it; " +
         "⑤ the files / paths / commands involved; ⑥ what is done and what is still pending; ⑦ any pitfalls and caveats. " +
-        "Do not fabricate information that did not appear; do not restate irrelevant intermediate steps sentence by sentence. Output only the summary body.",
+        "Do not fabricate information that did not appear; do not restate irrelevant intermediate steps sentence by sentence.\n\n" +
+        // Compaction-time task-state extraction: the summary is lossy, so separately capture the DURABLE
+        // mission state so it can be preserved verbatim even as this prose is later re-summarised.
+        "After the summary, output a task-state capture wrapped EXACTLY in these markers, on their own lines:\n" +
+        "<<<TASK_STATE>>>\n" +
+        "{\"notes\": \"<a few sentences capturing the CURRENT MISSION found in this history: the overall goal, the plan/phases, any hard constraints the user stated, and key decisions and why>\", \"todos\": [{\"title\": \"...\", \"status\": \"pending|in_progress|completed\"}]}\n" +
+        "<<<END_TASK_STATE>>>\n" +
+        "Include only what is genuinely present as a durable plan / goal / constraint / decision (omit todos if none). If there is no clear mission or plan in this history, output {} between the markers. Output the summary first, then the markers.",
     };
     const user: ApiMsg = { role: "user", content: renderTranscript(msgs) };
-    const data = await requestChat([sys, user], undefined, signal);
-    const text = data.choices?.[0]?.message?.content?.trim();
-    if (!text) throw new Error("Summary is empty");
-    return text;
+    // Logged under the "compact" actor: these tokens are the app's own housekeeping, not the answer
+    // the user asked for, and a usage report that hid them would under-count the turn.
+    const data = await requestChat([sys, user], undefined, signal, undefined, log ?? { actor: "compact" });
+    const raw = data.choices?.[0]?.message?.content ?? "";
+    // Split the prose summary from the appended task-state JSON (pure helper; robust to malformed markers).
+    const { summary, extracted } = parseSummaryWithTaskState(raw);
+    if (!summary) throw new Error("Summary is empty");
+    return { summary, extracted };
   };
 
   /**
    * Plan and freeze compaction at the start of each round (or manually). force=true is the manual "compact now", which ignores the threshold and compacts as much as possible.
    * Reuse memory: if a summary with the same coversCount already exists (history is append-only, so the earlier prefix is unchanged), reuse it directly, to avoid re-summarizing every round.
    */
-  const maybeCompact = async (opts: { force?: boolean; signal?: AbortSignal } = {}) => {
+  const maybeCompact = async (
+    opts: { force?: boolean; signal?: AbortSignal; log?: { actor: string; convId?: string; turnId?: string } } = {},
+  ) => {
     const full = convoRef.current;
     const cw = activeModel?.contextWindow ?? resolveContextWindow(activeModel?.model ?? "");
     const currentTokens = countMessagesTokens(full);
+    // Hybrid working-set budget: cap the trigger/target at an absolute token budget (configurable in
+    // Settings → General, default 120K, 0 = off) so a large-window model can't defer compaction until
+    // it has hoarded hundreds of thousands of tokens. null when disabled → original window-relative path.
+    const budget = resolveHybridBudget(cw, getContextBudgetK());
     // prev: pass in the previous compaction state so planCompaction "freezes the boundary" — reuse the old summary boundary until the tail again
     // exceeds the threshold; if coversCount is stable, the old summary body is reused below, so the post-compaction prefix is byte-stable and hits the prefix cache (§4.1).
     const res = planCompaction(full, {
@@ -1611,6 +1880,8 @@ function ChatAgent() {
       currentTokens,
       force: opts.force,
       prev: compactionRef.current,
+      triggerTokens: budget?.triggerTokens,
+      targetTokens: budget?.targetTokens,
     });
     if (!res) {
       // Below the threshold: if it is not a manual compaction, clear it (wire view == full conversation, most stable prefix cache); a manual compaction is kept as-is.
@@ -1629,7 +1900,18 @@ function ChatAgent() {
         summaryText = prev.summaryText; // Coverage unchanged → reuse the old summary, saving a model call
       } else {
         try {
-          summaryText = await summarizeHistory(summarizeMessages, opts.signal);
+          const { summary, extracted } = await summarizeHistory(summarizeMessages, opts.signal, opts.log);
+          summaryText = summary;
+          // The guarantee: capture any mission/plan/constraints from the span being discarded into Task
+          // Memory, non-destructively (fill-if-empty). This rescues a plan the model described but never
+          // recorded — captured exactly as its span is summarised — without clobbering a brief the model
+          // deliberately wrote. See docs/context-memory-tiers-design.md §5.3.
+          if (extracted) {
+            const convId = opts.log?.convId ?? convIdRef.current;
+            const prevTm = taskMemoryFor(convId);
+            const merged = mergeExtracted(prevTm, extracted);
+            if (merged.notes !== prevTm.notes) setTaskNotesFor(convId, merged.notes);
+          }
         } catch {
           summaryText = null; // Summary failed → fall back to dedup-only (buildWireContext ignores an empty summary)
         }
@@ -1647,9 +1929,12 @@ function ChatAgent() {
   /** The manual "compact now" button: compact once ignoring the auto threshold, but disallowed when usage is too low (<20%), reporting the result. */
   const compactNow = async () => {
     if (compacting || loading) return;
-    // When usage is below 20%, there is too little content and compaction is meaningless, so reject directly (consistent with the button's disabled condition, a double safeguard).
+    // When usage is below 20% of the window AND below any absolute budget, there is too little content
+    // and compaction is meaningless, so reject directly (consistent with the button's disabled condition).
     const cw = activeModel?.contextWindow ?? resolveContextWindow(activeModel?.model ?? "");
-    if (cw > 0 && contextTokensRef.current / cw < MANUAL_COMPACT_MIN_PCT) {
+    const budgetK = getContextBudgetK();
+    const overBudget = budgetK > 0 && contextTokensRef.current >= budgetK * 1000;
+    if (!overBudget && cw > 0 && contextTokensRef.current / cw < MANUAL_COMPACT_MIN_PCT) {
       toast.message(t("chat.compactMinTitle"));
       return;
     }
@@ -1705,8 +1990,29 @@ function ChatAgent() {
     name: string,
     args: Record<string, unknown>,
     displayName: string,
+    // Usage-log attribution: "main" for the primary agent, "sub:<id>" when a sub-agent is acting.
+    // Every tool call funnels through here, so this is the one place a delegation's actions are recorded.
+    actor = "main",
   ): Promise<string> => {
     ctx.status(toolStatusText(name, args));
+    const startedAt = Date.now();
+    const log = (ok: boolean, result: string, blocked?: boolean) =>
+      logToolCall({
+        actor,
+        name,
+        args,
+        ok,
+        blocked,
+        result,
+        // What this step costs the conversation: a tool call spends no tokens itself, but its result
+        // is carried into every later request, which is the number worth seeing per step. Estimated
+        // with the same tokenizer the context bar falls back to, and only when logging is on -- a
+        // tool result can be thousands of characters and tokenizing it otherwise is pure waste.
+        resultTokens: isUsageLogEnabledSync() ? countTokens(result) : undefined,
+        ms: Date.now() - startedAt,
+        convId: ctx.convId,
+        turnId: ctx.turnId,
+      });
     // Consent policy lives in toolNeedsConsent (constants.ts) so mode rules can grow in one place. Currently: dev mode
     // confirms sensitive tools, daily mode runs them directly. The "always" allowance still short-circuits repeat prompts.
     if (toolNeedsConsent(name, mode) && !allowedToolsRef.current.has(name)) {
@@ -1716,11 +2022,15 @@ function ChatAgent() {
       if (decision === "no") {
         const denied = "The user rejected this operation.";
         ctx.push({ kind: "tool", name: displayName, args, ok: false, result: denied });
+        // A refused call is logged too: "what did the agent try to do" is exactly the question the log
+        // exists to answer, and a silent gap there reads as if it never asked.
+        log(false, denied, true);
         return denied;
       }
     }
     const result = await callTool(name, args);
     ctx.push({ kind: "tool", name: displayName, args, ok: result.ok, result: result.content });
+    log(result.ok, result.content);
     return result.content;
   };
 
@@ -1732,6 +2042,15 @@ function ChatAgent() {
     if (!def) return `Unknown subagent: ${agentId}`;
     if (!task) return "task must not be empty.";
     ctx.status(t("chat.subagentProcessing", { agent: agentId }));
+
+    // Usage-log bookkeeping for this delegation. The sub-agent's own rounds are counted here rather
+    // than read back off turnUsageRef: that ref accumulates every conversation generating at the same
+    // time, so a background turn running in parallel would be billed to whichever delegation was open.
+    const startedAt = Date.now();
+    const actor = `sub:${agentId}`;
+    const subLog = { actor, convId: ctx.convId, turnId: ctx.turnId };
+    const subUsage = { prompt: 0, completion: 0, total: 0 };
+    let rounds = 0;
 
     // Show a "delegate" bubble, so the user can see what task the main model handed to which subagent.
     // Its `steps` grow in place as the subagent works, so the delegation is not an opaque wait.
@@ -1788,21 +2107,44 @@ function ChatAgent() {
     // Settle the bubble on the conclusion the sub-agent reported. Live and reloaded views must agree, and the
     // reload path rebuilds `result` from the persisted tool content — which is the conclusion, not the task.
     // Without this the bubble showed the task while running and the conclusion after reopening.
-    const finish = (conclusion: string): string => {
+    const finish = (conclusion: string, error?: string): string => {
       const next = { ...bubble, result: conclusion, steps: [...steps] };
       replaceDisplay(bubble, next);
       bubble = next;
+      // One line per delegation, beside the per-round model entries and the per-call tool entries it
+      // produced: the summary answers "what did handing this off cost", the others show how it got there.
+      logSubagentRun({
+        agent: agentId,
+        task,
+        rounds,
+        steps: steps.length,
+        promptTokens: subUsage.prompt,
+        completionTokens: subUsage.completion,
+        totalTokens: subUsage.total,
+        ms: Date.now() - startedAt,
+        ok: !error,
+        error,
+        convId: ctx.convId,
+        turnId: ctx.turnId,
+      });
       return conclusion;
     };
 
     // No upper limit on subagent rounds: loop until the subagent produces final text, or the user interrupts (using this run's own signal).
     while (true) {
-      if (ctx.signal.aborted) return finish("(canceled)");
+      if (ctx.signal.aborted) return finish("(canceled)", "cancelled");
       ctx.status(t("chat.subagentThinking", { agent: agentId }));
-      const data = await requestChat(convo, subTools, ctx.signal);
-      if (ctx.signal.aborted) return finish("(canceled)");
+      const data = await requestChat(convo, subTools, ctx.signal, undefined, subLog);
+      rounds++;
+      const u = data.usage;
+      if (u) {
+        subUsage.prompt += u.prompt_tokens ?? 0;
+        subUsage.completion += u.completion_tokens ?? 0;
+        subUsage.total += u.total_tokens ?? (u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0);
+      }
+      if (ctx.signal.aborted) return finish("(canceled)", "cancelled");
       const msg = data.choices?.[0]?.message;
-      if (!msg) return finish("(no response from subagent)");
+      if (!msg) return finish("(no response from subagent)", "no response");
       convo = [...convo, msg];
 
       if (msg.tool_calls && msg.tool_calls.length > 0) {
@@ -1813,7 +2155,7 @@ function ChatAgent() {
           } catch {
             /* Invalid JSON arguments, call with an empty object */
           }
-          const content = await execToolCall(collectCtx, tc.function.name, a, `${agentId}→${tc.function.name}`);
+          const content = await execToolCall(collectCtx, tc.function.name, a, `${agentId}→${tc.function.name}`, actor);
           return { tc, content };
         };
 
@@ -1833,7 +2175,7 @@ function ChatAgent() {
         }
 
         for (const group of groups) {
-          if (ctx.signal.aborted) return finish("(canceled)");
+          if (ctx.signal.aborted) return finish("(canceled)", "cancelled");
           const settled =
             group.length > 1 ? await Promise.all(group.map(runOne)) : [await runOne(group[0])];
           for (const { tc, content } of settled) {
@@ -2437,8 +2779,11 @@ function ChatAgent() {
     runsRef.current.set(genConvId, ctrl); // Register this conversation's run, for cancel (active conversation) / background concurrency
     // "Whether in the active view": apply view side effects only while active; a background conversation persists silently.
     const active = () => convIdRef.current === genConvId;
+    // One id per generation, shared by everything this turn spends (see RunCtx.turnId).
+    const turnId = `${genConvId}-${Date.now().toString(36)}`;
     const ctx: RunCtx = {
       convId: genConvId,
+      turnId,
       signal: ctrl.signal,
       push: (m) => { if (active()) pushDisplay(m); },
       status: (s) => { if (active()) setStatus(s); },
@@ -2451,6 +2796,7 @@ function ChatAgent() {
       const tools = [
         askUserTool(),
         updateTodosTool(),
+        setTaskStateTool(),
         openBrowserTool(mode),
         browserTool(),
         // Only offered when some configured key can actually serve it — otherwise the model would
@@ -2485,7 +2831,10 @@ function ChatAgent() {
       let firstRequest = true;
       // Start of this round: plan and freeze context compaction (only acts above the threshold, and may trigger one summarizer-model call).
       // Once frozen, any messages added during this round's tool loop are sent as-is, keeping the wire prefix stable throughout the round and hitting the prefix cache.
-      await maybeCompact({ signal: ctrl.signal });
+      await maybeCompact({
+        signal: ctrl.signal,
+        log: { actor: "compact", convId: genConvId, turnId },
+      });
       if (ctrl.signal.aborted) return;
       // This round's conversation buffer and compaction plan: captured as local values; afterwards the loop only mutates these two locals and never again directly reads/writes convoRef /
       // compactionRef (those belong to the "active view" and are rebuilt by loadConversation when switching conversations). Mirror them back to the view while active.
@@ -2526,9 +2875,42 @@ function ChatAgent() {
           wire = [...wire, { role: "system", content: feedbackNudge }];
         }
         firstRequest = false;
+        // Task Memory (CRITICAL tier): the pinned mission state — prose brief + todos — appended at the wire
+        // tail on EVERY request (the model needs its plan each round, not just the first). It lives outside
+        // convoRef, so compaction never summarises it; tail placement keeps the history prefix cache intact
+        // while the block stays current. This is what stops the agent forgetting its mission after older
+        // rounds are compacted. See docs/context-memory-tiers-design.md.
+        const taskBlock = renderTaskMemory(taskMemoryFor(genConvId));
+        if (taskBlock) wire = [...wire, { role: "system", content: taskBlock }];
         // Local models: strict llama.cpp chat templates require every system message at the front, so move the trailing
         // runtime context / nudges ahead of the user turns (see hoistSystemToFront). Cloud models keep the cache-friendly tail placement.
         if (isLocalModel) wire = hoistSystemToFront(wire);
+        // Context diagnostics (Phase 1, measurement only): snapshot exactly what is about to be sent —
+        // buckets + the tool-schema tax the app's own estimate never counts + the redundant-re-read proxy.
+        // Also stash the wire/tools/window so the offline replay harness can simulate budgets on this task.
+        {
+          const cw = activeModel?.contextWindow ?? resolveContextWindow(activeModel?.model ?? "");
+          diagRef.current = { messages: wire, tools, contextWindow: cw };
+          if (isUsageLogEnabledSync()) {
+            const b = describeContext(wire, tools);
+            logContextDiag({
+              actor: "main",
+              convId: genConvId,
+              turnId,
+              model: modelName,
+              ctxWindow: cw,
+              ctxSystem: b.system,
+              ctxToolSchemas: b.toolSchemas,
+              ctxHistory: b.history,
+              ctxToolOutputs: b.toolOutputs,
+              ctxSubagent: b.subagentOutputs,
+              ctxTotal: b.total,
+              ctxWire: b.wireTotal,
+              rereads: b.rereads,
+              msgCount: b.msgCount,
+            });
+          }
+        }
         // Two kinds of streaming:
         //  - Daily mode: incrementally render the final reply's content / reasoning chunk by chunk; discard the body of a tool-call round (often containing reasoning remnants).
         //  - Dev-mode "phased streaming": likewise streaming, but show each "tool-call round" body as that phase's summary
@@ -2556,7 +2938,11 @@ function ChatAgent() {
                 // the finalization below with asPhase=true folds that body into the "thinking process" timeline (exactly in sync with the tools starting to execute).
                 renderTurn(d.reasoning, showPhaseSummary ? phaseSummaryText(d.content) : d.content)
             : undefined;
-        const data = await requestChat(wire, tools, ctrl.signal, onDelta);
+        const data = await requestChat(wire, tools, ctrl.signal, onDelta, {
+          actor: "main",
+          convId: genConvId,
+          turnId,
+        });
         if (ctrl.signal.aborted) return;
         const msg = data.choices?.[0]?.message;
         if (!msg) throw new Error(t("chat.emptyResponse"));
@@ -2618,11 +3004,14 @@ function ChatAgent() {
             } catch {
               /* Invalid JSON arguments, call with an empty object */
             }
+            const startedAt = Date.now();
             const content =
               tc.function.name === "ask_user"
                 ? await askUserChoice(ctx, args)
                 : tc.function.name === "update_todos"
                   ? updateTodos(ctx, args)
+                  : tc.function.name === "set_task_state"
+                  ? setTaskState(ctx, args)
                   : tc.function.name === "openBrowser"
                     ? openBrowserAction(ctx, args)
                     : tc.function.name === "browser"
@@ -2640,6 +3029,24 @@ function ChatAgent() {
                               : tc.function.name === "run_subagent"
                             ? await runSubAgent(ctx, args)
                             : await execToolCall(ctx, tc.function.name, args, tc.function.name);
+            // Usage log: the branches above are the tools the renderer handles itself (a choice card,
+            // the todo list, a skill's instructions, memory, the browser panel). They never reach
+            // execToolCall, which is where every other tool is logged, so without this they would be
+            // the one class of action missing from the timeline. run_subagent is absent from the set
+            // because runSubAgent logs the delegation itself, with its rounds and tokens.
+            if (RENDERER_HANDLED_TOOLS.has(tc.function.name)) {
+              logToolCall({
+                actor: "main",
+                name: tc.function.name,
+                args,
+                ok: true,
+                result: content,
+                resultTokens: isUsageLogEnabledSync() ? countTokens(content) : undefined,
+                ms: Date.now() - startedAt,
+                convId: genConvId,
+                turnId,
+              });
+            }
             return { tc, args, content };
           };
 
@@ -2864,6 +3271,18 @@ function ChatAgent() {
     const disp = displayRef.current;
     const target = disp[displayIndex];
     if (!target || target.kind !== "user") return;
+    // Preserve the images the user originally attached to this message: editing the text or regenerating
+    // must not silently drop them. Reconstruct minimal image attachments from the stored image URLs
+    // (OSS link for a cloud model, data URI for a local one — both are directly usable as image_url at
+    // send time, so no file/hostPath is needed). We deliberately pass ONLY these below, never the
+    // input-box's currently staged attachments, so an edit can't merge in unrelated files.
+    const keptImages: Attachment[] = (target.images ?? []).map((url, i) => ({
+      id: ++attachIdRef.current,
+      name: `image-${i + 1}`,
+      size: 0,
+      kind: "image" as const,
+      url,
+    }));
     // Which user message this is (1-based): user messages correspond one-to-one across "display / wire / persistence", serving as the alignment anchor.
     let k = 0;
     for (let i = 0; i <= displayIndex; i++) if (disp[i]?.kind === "user") k++;
@@ -2903,8 +3322,9 @@ function ChatAgent() {
     manualCompactRef.current = false;
     setCompacted(false);
     persistCompaction(convId);
-    // Resend from this point with the new text (without the staged attachments, to avoid mistakenly merging in input-box attachments).
-    void send({ text: newText, attachments: [] });
+    // Resend from this point with the new text, re-attaching the original message's images (see keptImages)
+    // and nothing else — the input-box's staged attachments are intentionally excluded.
+    void send({ text: newText, attachments: keptImages });
   };
 
   return (
@@ -3222,6 +3642,12 @@ function ChatAgent() {
             const contextWindow = activeModel.contextWindow ?? resolveContextWindow(activeModel.model);
             const pct = contextWindow > 0 ? Math.min(100, Math.round((contextTokens / contextWindow) * 100)) : 0;
             const barColor = pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-emerald-500";
+            // Manual compaction is allowed once there's enough to compress: ≥20% of the window, OR — when an
+            // absolute budget is set — once context has passed that budget (so a 1M-window model isn't stuck
+            // "below 20%" while already carrying 200K). Keep this in sync with compactNow's guard.
+            const ctxBudgetK = getContextBudgetK();
+            const canCompact =
+              pct >= MANUAL_COMPACT_MIN_PCT * 100 || (ctxBudgetK > 0 && contextTokens >= ctxBudgetK * 1000);
             return (
               <div className="sticky bottom-0 z-10 mt-auto border-t border-line/70 bg-surface/60 px-4 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-surface/60">
                 <div className="mx-auto w-full max-w-3xl">
@@ -3240,13 +3666,9 @@ function ChatAgent() {
                       <button
                         type="button"
                         onClick={compactNow}
-                        disabled={compacting || loading || pct < MANUAL_COMPACT_MIN_PCT * 100}
+                        disabled={compacting || loading || !canCompact}
                         className="rounded px-1 py-px text-[10px] font-medium text-ink-subtle transition hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
-                        title={
-                          pct < MANUAL_COMPACT_MIN_PCT * 100
-                            ? t("chat.compactMinTitle")
-                            : t("chat.compactNowHint")
-                        }
+                        title={!canCompact ? t("chat.compactMinTitle") : t("chat.compactNowHint")}
                       >
                         {compacting ? t("chat.compacting") : t("chat.compactNow")}
                       </button>

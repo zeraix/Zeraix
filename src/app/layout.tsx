@@ -5,7 +5,6 @@ import SafetyRootLayout from "./SafetyRootLayout";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import ThemeProvider from "@/components/theme/ThemeProvider";
-import VoiceConnectionPanel from "@/components/VoiceConnectionPanel";
 import TitleBar from "@/components/electron/TitleBar";
 
 export const metadata: Metadata = {

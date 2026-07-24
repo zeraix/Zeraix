@@ -32,6 +32,26 @@ export const MIN_STUB_CHARS = 400;
 /** Lower bound for manual "compress now": manual compression is disallowed when context usage is below this fraction of the window (too little content, compression is meaningless). */
 export const MANUAL_COMPACT_MIN_PCT = 0.2;
 
+/**
+ * Resolve the hybrid auto-compaction trigger/target (in tokens) from the model's context window and an
+ * absolute working-set budget (K tokens). The effective threshold is the MORE aggressive of the two —
+ * min(window-relative, absolute) — so a large window can no longer defer compaction indefinitely.
+ * Returns null when budgetK <= 0, which leaves planCompaction on its original window-relative behaviour.
+ * The absolute target keeps the SAME trigger→target hysteresis ratio as the window-relative path, so the
+ * anti-thrash gap is preserved at any budget.
+ */
+export function resolveHybridBudget(
+  contextWindow: number,
+  budgetK: number,
+): { triggerTokens: number; targetTokens: number } | null {
+  if (!budgetK || budgetK <= 0) return null;
+  const budget = budgetK * 1000;
+  return {
+    triggerTokens: Math.min(contextWindow * COMPACT_TRIGGER_PCT, budget),
+    targetTokens: Math.min(contextWindow * COMPACT_TARGET_PCT, budget * (COMPACT_TARGET_PCT / COMPACT_TRIGGER_PCT)),
+  };
+}
+
 /** Pure read tools: when the same path is read again, the earlier result is entirely redundant. */
 const READ_TOOLS = new Set(["read_file"]);
 /** Tools that change a file's content / existence: after them, an earlier read result for the same path is stale. key = which parameter to take as the path. */
@@ -81,7 +101,7 @@ interface CallInfo {
   name: string;
   path: string;
 }
-function indexCalls(messages: ApiMsg[]): Map<string, CallInfo> {
+export function indexCalls(messages: ApiMsg[]): Map<string, CallInfo> {
   const byId = new Map<string, CallInfo>();
   for (const m of messages) {
     if (m.role !== "assistant" || !m.tool_calls) continue;
@@ -109,7 +129,7 @@ function indexCalls(messages: ApiMsg[]): Map<string, CallInfo> {
  * or any write afterward, that result is redundant/stale → stub it. Keep the last one. Only include results exceeding MIN_STUB_CHARS.
  * @param startIndex Only deduplicate messages at this index and after (in the summary scenario = the start of the kept tail, to avoid reprocessing overlap with the summarized segment).
  */
-function computeStaleStubs(
+export function computeStaleStubs(
   messages: ApiMsg[],
   calls: Map<string, CallInfo>,
   startIndex: number,
@@ -171,9 +191,17 @@ export function planCompaction(
     force?: boolean;
     /** The previous compaction state: used for the "freeze boundary" — reusing its summary boundary until the tail exceeds the threshold again (see below). */
     prev?: CompactionState | null;
+    /**
+     * Optional absolute overrides (in tokens). When present they REPLACE the window-relative
+     * trigger / target, giving the caller a hybrid budget (Phase 3: min(window*pct, budget)) or a
+     * simulation knob (Phase 2 replay). Undefined preserves the original window-relative behaviour
+     * exactly, so existing callers are unaffected.
+     */
+    triggerTokens?: number;
+    targetTokens?: number;
   },
 ): { plan: CompactionPlan; summarizeMessages: ApiMsg[] } | null {
-  const trigger = opts.contextWindow * COMPACT_TRIGGER_PCT;
+  const trigger = opts.triggerTokens ?? opts.contextWindow * COMPACT_TRIGGER_PCT;
   // force: manual "compress now", ignoring the threshold and compressing as hard as possible (dedup + summarize the history before the last KEEP_TAIL_TURNS).
   if (!opts.force && opts.currentTokens <= trigger) return null;
 
@@ -184,7 +212,7 @@ export function planCompaction(
 
   // First do dedup only, and see if that's already enough to drop below the target line.
   const dedupOnly = computeStaleStubs(messages, calls, bodyStart);
-  const target = opts.contextWindow * COMPACT_TARGET_PCT;
+  const target = opts.targetTokens ?? opts.contextWindow * COMPACT_TARGET_PCT;
   const afterDedup = estTokens(applyStubs(messages, dedupOnly));
   if (!opts.force && afterDedup <= target) {
     return {
@@ -251,7 +279,7 @@ export function planCompaction(
 // ── Apply: produce the wire view from the full conversation + state ────────────────────────────────────────
 
 /** Replace the content of the tool results listed in stubs with stub text (other messages as-is). Pure function, doesn't mutate the arguments. */
-function applyStubs(messages: ApiMsg[], stubs: Map<string, string>): ApiMsg[] {
+export function applyStubs(messages: ApiMsg[], stubs: Map<string, string>): ApiMsg[] {
   if (stubs.size === 0) return messages;
   return messages.map((m) =>
     m.role === "tool" && stubs.has(m.tool_call_id)
